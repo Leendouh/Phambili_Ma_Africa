@@ -1,0 +1,81 @@
+{
+  "expo": {
+    "name": "Phambili Ma-Africa",
+    "slug": "phambili-ma-africa",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "phambili",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0066cc"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.phambili.maafrica",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow access to camera for venue photos",
+        "NSPhotoLibraryUsageDescription": "Allow access to photo library for profile and venue images",
+        "NSLocationWhenInUseUsageDescription": "Allow location for check-in/check-out"
+      }
+    },
+    "android": {
+      "package": "com.phambili.maafrica",
+      "adaptiveIcon": {
+        "backgroundColor": "#0066cc",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "VIBRATE"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-image",
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow access to your photo library for profile and venue images",
+          "cameraPermission": "Allow access to camera for venue photos"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0066cc",
+          "sounds": []
+        }
+      ],
+      "expo-splash-screen",
+      "expo-font"
+    ],
+    "extra": {
+      "apiBaseUrl": "http://localhost/Phambili_Ma_Africa/api"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/REPLACE_WITH_PROJECT_ID"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
+  }
+}
