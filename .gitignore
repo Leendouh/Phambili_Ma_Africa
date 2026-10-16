@@ -1,0 +1,30 @@
+# db.sql 
+# Environment / secrets
+.env
+mobile/.env
+*.env
+!.env.example
+
+# Node
+node_modules/
+mobile/node_modules/
+mobile/dist/
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.qodo/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Uploads (optional — decide if you want user uploads tracked)
+uploads/

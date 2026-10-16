@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isStaff() { return signedIn() && myRole() == 'staff'; }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isStaff());
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == 'customer';
+      allow update: if signedIn() && (
+          (request.auth.uid == uid && request.resource.data.role == resource.data.role)
+          || isStaff());
+      allow delete: if false;
+    }
+
+    match /services/{id} {
+      allow read: if signedIn();
+      allow write: if isStaff();
+    }
+
+    match /requests/{id} {
+      allow read: if signedIn() && (isStaff()
+          || resource.data.customerId == request.auth.uid
+          || resource.data.employeeId == request.auth.uid);
+
+      allow create: if signedIn() && myRole() == 'customer'
+          && request.resource.data.customerId == request.auth.uid
+          && request.resource.data.status == 'Pending'
+          && request.resource.data.employeeId == null;
+
+      allow update: if isStaff() && (
+            (resource.data.status == 'Pending'
+              && request.resource.data.status in ['Approved', 'Rejected'])
+         || (resource.data.status == 'Approved'
+              && request.resource.data.status == 'Approved'))
+        || (signedIn() && myRole() == 'employee'
+            && resource.data.employeeId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && ((resource.data.status == 'Approved' && request.resource.data.status == 'In Progress')
+             || (resource.data.status == 'In Progress' && request.resource.data.status == 'Completed')))
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hasFeedback']));
+      allow delete: if false;
+    }
+
+    match /feedback/{requestId} {
+      allow read: if signedIn() && (isStaff() || resource == null
+          || resource.data.customerId == request.auth.uid);
+      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid
+          && request.resource.data.rating is int
+          && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+          && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'Completed'
+          && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /notifications/{id} {
+      allow read: if signedIn() && resource.data.recipientId == request.auth.uid;
+      allow create: if signedIn();
+      allow update: if signedIn() && resource.data.recipientId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+      allow delete: if false;
+    }
+  }
+}
