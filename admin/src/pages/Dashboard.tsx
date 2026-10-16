@@ -67,11 +67,11 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
-      <header className="bg-green-700 text-white shadow-md">
+      <header className="bg-brand-700 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">Phambili Ma Africa</h1>
-            <p className="text-green-100 text-sm">Admin Dashboard</p>
+            <p className="text-brand-100 text-sm">Admin Dashboard</p>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm">
@@ -79,7 +79,7 @@ export default function Dashboard() {
             </span>
             <button
               onClick={handleLogout}
-              className="bg-green-600 hover:bg-green-800 px-4 py-2 rounded-md transition-colors"
+              className="bg-brand-600 hover:bg-brand-800 px-4 py-2 rounded-md transition-colors"
             >
               Logout
             </button>
@@ -93,37 +93,37 @@ export default function Dashboard() {
           <div className="flex space-x-8">
             <button
               onClick={() => navigate('/dashboard')}
-              className="py-4 px-2 border-b-2 border-green-700 text-green-700 font-medium"
+              className="py-4 px-2 border-b-2 border-brand-700 text-brand-700 font-medium"
             >
               Dashboard
             </button>
             <button
               onClick={() => navigate('/requests')}
-              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-green-700 font-medium"
+              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-brand-700 font-medium"
             >
               Requests
             </button>
             <button
               onClick={() => navigate('/employees')}
-              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-green-700 font-medium"
+              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-brand-700 font-medium"
             >
               Employees
             </button>
             <button
               onClick={() => navigate('/services')}
-              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-green-700 font-medium"
+              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-brand-700 font-medium"
             >
               Services
             </button>
             <button
               onClick={() => navigate('/customers')}
-              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-green-700 font-medium"
+              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-brand-700 font-medium"
             >
               Customers
             </button>
             <button
               onClick={() => navigate('/reports')}
-              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-green-700 font-medium"
+              className="py-4 px-2 border-b-2 border-transparent text-gray-600 hover:text-brand-700 font-medium"
             >
               Reports
             </button>
@@ -149,19 +149,19 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
               onClick={() => navigate('/requests')}
-              className="bg-green-700 text-white py-3 px-4 rounded-md hover:bg-green-800 transition-colors"
+              className="bg-brand-700 text-white py-3 px-4 rounded-md hover:bg-brand-800 transition-colors"
             >
               Manage Requests
             </button>
             <button
               onClick={() => navigate('/employees')}
-              className="bg-green-700 text-white py-3 px-4 rounded-md hover:bg-green-800 transition-colors"
+              className="bg-brand-700 text-white py-3 px-4 rounded-md hover:bg-brand-800 transition-colors"
             >
               Manage Employees
             </button>
             <button
               onClick={() => navigate('/reports')}
-              className="bg-green-700 text-white py-3 px-4 rounded-md hover:bg-green-800 transition-colors"
+              className="bg-brand-700 text-white py-3 px-4 rounded-md hover:bg-brand-800 transition-colors"
             >
               View Reports
             </button>

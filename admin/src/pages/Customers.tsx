@@ -75,15 +75,15 @@ export default function Customers() {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
-      <header className="bg-green-700 text-white shadow-md">
+      <header className="bg-brand-700 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">Phambili Ma Africa</h1>
-            <p className="text-green-100 text-sm">Admin Dashboard</p>
+            <p className="text-brand-100 text-sm">Admin Dashboard</p>
           </div>
           <button
             onClick={() => navigate('/dashboard')}
-            className="bg-green-600 hover:bg-green-800 px-4 py-2 rounded-md transition-colors"
+            className="bg-brand-600 hover:bg-brand-800 px-4 py-2 rounded-md transition-colors"
           >
             Back to Dashboard
           </button>
@@ -161,7 +161,7 @@ export default function Customers() {
 
       {/* Edit Modal */}
       {editModalOpen && selectedCustomer && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold mb-4">Edit Customer</h3>
             
@@ -174,7 +174,7 @@ export default function Customers() {
                   type="text"
                   value={formData.firstName}
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>
 
@@ -186,7 +186,7 @@ export default function Customers() {
                   type="text"
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>
 
@@ -198,7 +198,7 @@ export default function Customers() {
                   type="text"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
               </div>
 
@@ -209,7 +209,7 @@ export default function Customers() {
                 <textarea
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                   rows={3}
                 />
               </div>
@@ -227,7 +227,7 @@ export default function Customers() {
               </button>
               <button
                 onClick={handleUpdateCustomer}
-                className="px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800"
+                className="px-4 py-2 bg-brand-700 text-white rounded-md hover:bg-brand-800"
               >
                 Update
               </button>

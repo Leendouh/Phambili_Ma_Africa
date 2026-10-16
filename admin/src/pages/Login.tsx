@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Login() {
-  const { login, userProfile, loading } = useAuth();
+  const { login, logout, currentUser, userProfile, loading, mfaVerified } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -11,14 +11,20 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
 
   React.useEffect(() => {
-    if (userProfile) {
-      if (userProfile.role === 'staff') {
-        navigate('/dashboard');
-      } else {
-        setError('Access denied. Staff only.');
-      }
+    if (loading || !currentUser) return;
+
+    if (userProfile?.role === 'staff') {
+      navigate(mfaVerified ? '/dashboard' : '/verify', { replace: true });
+      return;
     }
-  }, [userProfile, navigate]);
+
+    setError(
+      userProfile
+        ? 'Access denied. This dashboard is for staff only.'
+        : 'This account has not been set up for the dashboard. Please contact an administrator.'
+    );
+    logout().catch(() => undefined);
+  }, [loading, currentUser, userProfile, mfaVerified, navigate, logout]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,7 +52,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gray-100 px-4">
       <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-green-700">Phambili Ma Africa</h1>
+          <h1 className="text-3xl font-bold text-brand-700">Phambili Ma Africa</h1>
           <p className="text-gray-600 mt-2">Admin Dashboard</p>
         </div>
 
@@ -66,7 +72,7 @@ export default function Login() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
               required
             />
           </div>
@@ -80,7 +86,7 @@ export default function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
               required
             />
           </div>
@@ -88,7 +94,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full bg-green-700 text-white py-2 px-4 rounded-md hover:bg-green-800 disabled:bg-gray-400 transition-colors"
+            className="w-full bg-brand-700 text-white py-2 px-4 rounded-md hover:bg-brand-800 disabled:bg-gray-400 transition-colors"
           >
             {submitting ? 'Logging in...' : 'Login'}
           </button>

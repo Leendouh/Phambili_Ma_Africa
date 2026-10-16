@@ -84,9 +84,15 @@ export default function Reports() {
       ];
     });
 
+    const csvCell = (value: unknown) => {
+      let text = String(value ?? '');
+      if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
     const csvContent = [
       headers.join(','),
-      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
+      ...rows.map((row) => row.map(csvCell).join(',')),
     ].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -109,15 +115,15 @@ export default function Reports() {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
-      <header className="bg-green-700 text-white shadow-md">
+      <header className="bg-brand-700 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">Phambili Ma Africa</h1>
-            <p className="text-green-100 text-sm">Admin Dashboard</p>
+            <p className="text-brand-100 text-sm">Admin Dashboard</p>
           </div>
           <button
             onClick={() => navigate('/dashboard')}
-            className="bg-green-600 hover:bg-green-800 px-4 py-2 rounded-md transition-colors"
+            className="bg-brand-600 hover:bg-brand-800 px-4 py-2 rounded-md transition-colors"
           >
             Back to Dashboard
           </button>
@@ -132,7 +138,7 @@ export default function Reports() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow-md p-6">
             <h3 className="text-lg font-semibold text-gray-800 mb-2">Total Requests</h3>
-            <p className="text-4xl font-bold text-green-700">{requests.length}</p>
+            <p className="text-4xl font-bold text-brand-700">{requests.length}</p>
           </div>
           <div className="bg-white rounded-lg shadow-md p-6">
             <h3 className="text-lg font-semibold text-gray-800 mb-2">Average Rating</h3>
@@ -152,7 +158,7 @@ export default function Reports() {
               {mostRequestedServices.map(([serviceName, count], index) => (
                 <div key={serviceName} className="flex justify-between items-center p-3 bg-gray-50 rounded">
                   <div className="flex items-center">
-                    <span className="text-2xl font-bold text-green-700 mr-4">{index + 1}</span>
+                    <span className="text-2xl font-bold text-brand-700 mr-4">{index + 1}</span>
                     <span className="font-medium">{serviceName}</span>
                   </div>
                   <span className="text-gray-600">{count} requests</span>
@@ -170,7 +176,7 @@ export default function Reports() {
             <h3 className="text-lg font-semibold text-gray-800">Customer Feedback</h3>
             <button
               onClick={exportCSV}
-              className="bg-green-700 text-white px-4 py-2 rounded-md hover:bg-green-800 transition-colors"
+              className="bg-brand-700 text-white px-4 py-2 rounded-md hover:bg-brand-800 transition-colors"
             >
               Export CSV
             </button>
@@ -183,7 +189,7 @@ export default function Reports() {
                 type="date"
                 value={dateFilter}
                 onChange={(e) => setDateFilter(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
             </div>
             <div>
@@ -191,7 +197,7 @@ export default function Reports() {
               <select
                 value={serviceFilter}
                 onChange={(e) => setServiceFilter(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
                 <option value="">All Services</option>
                 {Array.from(new Set(requests.map((r) => r.serviceName))).map((serviceName) => (

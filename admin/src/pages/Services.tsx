@@ -117,15 +117,15 @@ export default function Services() {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header */}
-      <header className="bg-green-700 text-white shadow-md">
+      <header className="bg-brand-700 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">Phambili Ma Africa</h1>
-            <p className="text-green-100 text-sm">Admin Dashboard</p>
+            <p className="text-brand-100 text-sm">Admin Dashboard</p>
           </div>
           <button
             onClick={() => navigate('/dashboard')}
-            className="bg-green-600 hover:bg-green-800 px-4 py-2 rounded-md transition-colors"
+            className="bg-brand-600 hover:bg-brand-800 px-4 py-2 rounded-md transition-colors"
           >
             Back to Dashboard
           </button>
@@ -138,7 +138,7 @@ export default function Services() {
           <h2 className="text-2xl font-bold text-gray-800">Services</h2>
           <button
             onClick={openAddModal}
-            className="bg-green-700 text-white px-4 py-2 rounded-md hover:bg-green-800 transition-colors"
+            className="bg-brand-700 text-white px-4 py-2 rounded-md hover:bg-brand-800 transition-colors"
           >
             Add Service
           </button>
@@ -218,7 +218,7 @@ export default function Services() {
 
       {/* Add/Edit Modal */}
       {modalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold mb-4">
               {editMode ? 'Edit Service' : 'Add Service'}
@@ -233,7 +233,7 @@ export default function Services() {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                   required
                 />
               </div>
@@ -245,7 +245,7 @@ export default function Services() {
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                   rows={3}
                   required
                 />
@@ -260,7 +260,7 @@ export default function Services() {
                   step="0.01"
                   value={formData.price}
                   onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-500"
                   required
                 />
               </div>
@@ -279,7 +279,7 @@ export default function Services() {
               </button>
               <button
                 onClick={editMode ? handleUpdateService : handleAddService}
-                className="px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800"
+                className="px-4 py-2 bg-brand-700 text-white rounded-md hover:bg-brand-800"
               >
                 {editMode ? 'Update' : 'Add'}
               </button>
