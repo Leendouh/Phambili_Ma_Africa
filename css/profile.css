@@ -1,0 +1,1789 @@
+/* Profile Page Styles */
+.profile-page {
+    background: linear-gradient(135deg, #f8fafc 0%, #e6f7ff 100%);
+    min-height: 100vh;
+}
+
+.profile-main {
+    padding: 2rem 1rem;
+    padding-top: 80px;
+}
+
+.profile-container {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+/* Alert Messages */
+.alert {
+    padding: 1rem 1.5rem;
+    border-radius: 10px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-weight: 500;
+}
+
+.alert-success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.alert-error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Notification Section */
+.notification-section {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 15px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.notification-header h3 {
+    margin: 0;
+    color: white;
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.mark-all-read-btn {
+    color: white;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 500;
+    opacity: 0.9;
+    transition: opacity 0.3s ease;
+}
+
+.mark-all-read-btn:hover {
+    opacity: 1;
+    text-decoration: underline;
+}
+
+.notification-item {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    transition: all 0.3s ease;
+}
+
+.notification-item:last-child {
+    margin-bottom: 0;
+}
+
+.notification-item.unread {
+    border-left: 4px solid white;
+}
+
+.notification-content {
+    flex: 1;
+}
+
+.notification-content strong {
+    display: block;
+    color: #333;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+}
+
+.notification-content p {
+    margin: 0 0 0.5rem 0;
+    color: #666;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.notification-time {
+    color: #999;
+    font-size: 0.8rem;
+}
+
+.notification-close {
+    background: rgba(102, 126, 234, 0.1);
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #667eea;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.notification-close:hover {
+    background: rgba(102, 126, 234, 0.2);
+    transform: scale(1.1);
+}
+
+/* Notification History */
+.notifications-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.notification-history-item {
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 1.25rem;
+    background: var(--white);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    transition: all 0.3s ease;
+}
+
+.notification-history-item.unread {
+    border-left: 4px solid var(--accent-color);
+    background: #f8f9fa;
+}
+
+.notification-history-content {
+    flex: 1;
+}
+
+.notification-history-content strong {
+    display: block;
+    color: var(--text-color);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.notification-history-content p {
+    margin: 0 0 0.75rem 0;
+    color: var(--text-light);
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.notification-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+}
+
+.notification-meta .notification-time {
+    color: var(--text-light);
+}
+
+.notification-meta .notification-type {
+    color: var(--accent-color);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+
+.mark-read-btn {
+    background: var(--accent-color);
+    color: var(--white);
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.mark-read-btn:hover {
+    background: var(--accent-color-dark);
+}
+
+/* Profile Header */
+.profile-header {
+    background: var(--white);
+    border-radius: 15px;
+    padding: 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    margin-bottom: 1.5rem;
+}
+
+.profile-avatar {
+    flex-shrink: 0;
+}
+
+.avatar-circle {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--white);
+    font-size: 2rem;
+    font-weight: 700;
+    box-shadow: 0 4px 10px rgba(0, 86, 179, 0.3);
+}
+
+.profile-info-header {
+    flex: 1;
+}
+
+.profile-name {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-color);
+    margin: 0 0 0.5rem 0;
+}
+
+.profile-email {
+    font-size: 1rem;
+    color: var(--text-light);
+    margin: 0 0 0.75rem 0;
+}
+
+.profile-role-badge {
+    display: inline-block;
+    background: var(--accent-color);
+    color: var(--white);
+    padding: 0.35rem 1rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+/* Profile Sections */
+.profile-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.profile-section {
+    background: var(--white);
+    border-radius: 15px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+}
+
+.section-header {
+    padding: 1.25rem 1.5rem;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.section-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.section-header h2 i {
+    color: var(--primary-color);
+}
+
+.view-all-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.view-all-link:hover {
+    text-decoration: underline;
+}
+
+.section-content {
+    padding: 1.5rem;
+}
+
+/* Edit Buttons */
+.edit-section-btn {
+    background: var(--white);
+    color: var(--primary-color);
+    border: 2px solid var(--primary-color);
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.edit-section-btn:hover {
+    background: var(--primary-dark);
+    color: var(--white);
+}
+
+/* Info Grid */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+}
+
+.info-item.full-width {
+    grid-column: 1 / -1;
+}
+
+.info-item label {
+    display: block;
+    font-weight: 600;
+    color: var(--text-light);
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-item p {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.edit-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: 'Open Sans', sans-serif;
+    transition: all 0.3s ease;
+}
+
+.edit-input:focus {
+    outline: none;
+    border-color: var(--primary-dark);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+/* Buttons */
+.btn-primary {
+    background: var(--primary-dark);
+    color: var(--white);
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+    background: var(--primary-dark);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 123, 255, 0.3);
+}
+
+.btn-secondary {
+    background: var(--accent-color);
+    color: var(--white);
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.95rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.btn-secondary:hover {
+    background: var(--accent-color-dark);
+    transform: translateY(-2px);
+}
+
+.btn-outline {
+    background: transparent;
+    color: var(--accent-color);
+    border: 2px solid var(--accent-color);
+    padding: 0.6rem 1.25rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.btn-outline:hover {
+    background: var(--primary-color);
+    color: var(--white);
+}
+
+.btn-outline-small {
+    background: transparent;
+    color: var(--primary-color);
+    border: 1px solid var(--primary-color);
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.btn-outline-small:hover {
+    background: var(--primary-color);
+    color: var(--white);
+}
+
+.section-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    justify-content: flex-end;
+}
+
+/* Settings List */
+.settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.setting-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem;
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    transition: all 0.3s ease;
+}
+
+.setting-item:hover {
+    border-color: var(--accent-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.setting-info h4 {
+    margin: 0 0 0.35rem 0;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.setting-info h4 i {
+    color: var(--accent-color);
+}
+
+.setting-info p {
+    margin: 0;
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+/* Booking History */
+.booking-history {
+    min-height: 150px;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 2.5rem 1.5rem;
+}
+
+.empty-icon {
+    font-size: 3.5rem;
+    color: #dee2e6;
+    margin-bottom: 1rem;
+}
+
+.empty-state h3 {
+    color: var(--text-light);
+    margin: 0 0 0.5rem 0;
+}
+
+.empty-state p {
+    color: var(--text-light);
+    margin: 0 0 1.5rem 0;
+}
+
+/* Bookings List */
+.bookings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.booking-card {
+    border: 1px solid #e9ecef;
+    border-radius: 10px;
+    padding: 1.25rem;
+    background: var(--white);
+    transition: all 0.3s ease;
+}
+
+.booking-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.booking-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+
+.booking-service-info {
+    flex: 1;
+}
+
+.booking-service-name {
+    margin: 0 0 0.35rem 0;
+    color: var(--text-color);
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.booking-date {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.booking-status {
+    padding: 0.35rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-pending {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.status-requested {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.status-contacted {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.status-in_progress {
+    background: #fff3e0;
+    color: #f57c00;
+}
+
+.status-quoted {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.status-confirmed {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.status-completed {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-cancelled {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.status-expired {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.booking-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 0.75rem;
+    border-top: 1px solid #e9ecef;
+}
+
+.booking-amount {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+/* Booking Filters */
+.booking-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    background: var(--white);
+    border: 2px solid #e9ecef;
+    border-radius: 25px;
+    color: var(--text-color);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.filter-btn:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.filter-btn.active {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: var(--white);
+}
+
+.filter-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    background: rgba(0, 123, 255, 0.1);
+    border-radius: 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.filter-btn.active .filter-count {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Enhanced Booking Card Styles */
+.booking-card-content {
+    display: flex;
+    gap: 1rem;
+}
+
+.booking-image {
+    flex-shrink: 0;
+    width: 100px;
+    height: 100px;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.booking-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.booking-details-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.booking-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.35rem;
+}
+
+.booking-time {
+    color: var(--text-light);
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.booking-notes {
+    margin: 0.75rem 0;
+    padding: 0.75rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--text-light);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.booking-notes i {
+    color: var(--accent-color);
+    margin-top: 2px;
+}
+
+.booking-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.btn-cancel-small {
+    background: transparent;
+    color: #dc3545;
+    border: 1px solid #dc3545;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.85rem;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    transition: all 0.3s ease;
+}
+
+.btn-cancel-small:hover {
+    background: #dc3545;
+    color: var(--white);
+}
+
+/* Booking Card Status Indicators */
+.booking-card.status-pending {
+    border-left: 4px solid #ffc107;
+}
+
+.booking-card.status-confirmed {
+    border-left: 4px solid #17a2b8;
+}
+
+.booking-card.status-completed {
+    border-left: 4px solid #28a745;
+}
+
+.booking-card.status-cancelled {
+    border-left: 4px solid #dc3545;
+    opacity: 0.8;
+}
+
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal {
+    background: var(--white);
+    border-radius: 15px;
+    width: 100%;
+    max-width: 450px;
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    color: var(--text-light);
+    transition: color 0.3s ease;
+    padding: 0.25rem;
+}
+
+.modal-close:hover {
+    color: var(--text-color);
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+/* Form Styles */
+.form-group {
+    margin-bottom: 1.25rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.form-group label i {
+    color: var(--accent-color);
+}
+
+.input-with-icon {
+    position: relative;
+}
+
+.input-with-icon input {
+    width: 100%;
+    padding: 0.75rem;
+    padding-right: 2.5rem;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: 'Open Sans', sans-serif;
+    transition: all 0.3s ease;
+}
+
+.input-with-icon input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.password-toggle {
+    position: absolute;
+    right: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-light);
+    cursor: pointer;
+    padding: 0.25rem;
+    font-size: 1rem;
+}
+
+.password-toggle:hover {
+    color: var(--text-color);
+}
+
+.form-hint {
+    display: block;
+    margin-top: 0.35rem;
+    color: var(--text-light);
+    font-size: 0.85rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    margin-top: 1.5rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .profile-main {
+        padding: 1rem;
+        padding-top: 70px;
+    }
+    
+    .profile-header {
+        flex-direction: column;
+        text-align: center;
+        padding: 1.5rem;
+    }
+    
+    .avatar-circle {
+        width: 70px;
+        height: 70px;
+        font-size: 1.75rem;
+    }
+    
+    .profile-name {
+        font-size: 1.5rem;
+    }
+    
+    .info-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .section-content {
+        padding: 1.25rem;
+    }
+    
+    .setting-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+    
+    .section-actions {
+        flex-direction: column;
+    }
+    
+    .section-actions button {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+    }
+    
+    .form-actions button {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .booking-header {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .booking-footer {
+        flex-direction: column;
+        gap: 0.75rem;
+        align-items: flex-start;
+    }
+}
+
+/* ===== Mobile: ≤480px – compact profile ===== */
+@media (max-width: 480px) {
+    .profile-main {
+        padding: 0.6rem 0.4rem;
+        padding-top: 60px;
+    }
+
+    .profile-container {
+        padding: 0;
+    }
+
+    /* Alerts – tight & centered */
+    .alert {
+        padding: 0.3rem 0.6rem;
+        margin-bottom: 0.6rem;
+        font-size: 0.75rem;
+        border-radius: 6px;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .alert i {
+        font-size: 0.8rem;
+    }
+
+    /* Notification section – header now uses flex + right alignment */
+    .notification-section {
+        padding: 1rem 0.75rem;
+        border-radius: 10px;
+        margin-bottom: 0.8rem;
+    }
+    /* Force the header to keep "Mark all as read" on the far right */
+    .notification-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: nowrap;            /* prevents link from dropping below */
+        gap: 0.3rem;
+    }
+    .notification-header h3 {
+        font-size: 0.85rem;
+        gap: 0.3rem;
+        white-space: nowrap;          /* keep heading text in one line */
+    }
+    .notification-header h3 i {
+        font-size: 0.85rem;
+    }
+    .mark-all-read-btn {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.4rem;
+        white-space: nowrap;          /* keep the button text from wrapping */
+        flex-shrink: 0;               /* prevent it from shrinking */
+    }
+    .notification-item {
+        padding: 0.6rem 0.75rem;
+        font-size: 0.8rem;
+    }
+    .notification-content strong {
+        font-size: 0.85rem;
+    }
+    .notification-content p {
+        font-size: 0.75rem;
+    }
+    .notification-time {
+        font-size: 0.65rem;
+    }
+    .notification-close {
+        width: 24px;
+        height: 24px;
+        font-size: 0.8rem;
+    }
+
+    /* Notification history */
+    .notification-history-item {
+        padding: 0.75rem;
+        font-size: 0.8rem;
+    }
+    .notification-history-content strong {
+        font-size: 0.85rem;
+    }
+    .notification-history-content p {
+        font-size: 0.75rem;
+    }
+    .notification-meta {
+        font-size: 0.7rem;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .mark-read-btn {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.7rem;
+    }
+
+    /* Profile header */
+    .profile-header {
+        padding: 1rem 0.8rem;
+        flex-direction: column;
+        text-align: center;
+        gap: 0.6rem;
+    }
+    .avatar-circle {
+        width: 60px;
+        height: 60px;
+        font-size: 1.5rem;
+    }
+    .profile-name {
+        font-size: 1.3rem;
+    }
+    .profile-email {
+        font-size: 0.85rem;
+        margin-bottom: 0.4rem;
+    }
+    .profile-role-badge {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.8rem;
+    }
+
+    /* Profile sections */
+    .profile-sections {
+        gap: 0.8rem;
+    }
+    .profile-section {
+        border-radius: 10px;
+    }
+    .section-header {
+        padding: 0.8rem 1rem;
+    }
+    .section-header h2 {
+        font-size: 1rem;
+        gap: 0.3rem;
+    }
+    .section-header h2 i {
+        font-size: 0.9rem;
+    }
+    .edit-section-btn {
+        padding: 0.3rem 0.7rem;
+        font-size: 0.75rem;
+        border-radius: 6px;
+    }
+    .section-content {
+        padding: 0.8rem 0.8rem;
+    }
+
+    /* Info grid – single column */
+    .info-grid {
+        grid-template-columns: 1fr;
+        gap: 0.8rem;
+    }
+    .info-item label {
+        font-size: 0.7rem;
+        margin-bottom: 0.2rem;
+    }
+    .info-item p {
+        font-size: 0.85rem;
+    }
+    .edit-input {
+        padding: 0.5rem 0.6rem;
+        font-size: 0.85rem;
+        border-radius: 6px;
+    }
+
+    /* Buttons */
+    .btn-primary,
+    .btn-secondary,
+    .btn-outline {
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+        border-radius: 6px;
+    }
+    .btn-outline-small {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.75rem;
+    }
+    .section-actions {
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+    .section-actions .btn-primary,
+    .section-actions .btn-secondary {
+        width: 100%;
+        justify-content: center;
+    }
+
+    /* Password form */
+    .password-section h4 {
+        font-size: 0.95rem;
+        margin-bottom: 0.8rem;
+    }
+    .password-form .info-grid {
+        gap: 0.6rem;
+    }
+    .password-form .info-item label {
+        font-size: 0.7rem;
+    }
+    .password-form .input-with-icon input {
+        padding: 0.5rem 0.6rem;
+        font-size: 0.85rem;
+    }
+    .password-form small {
+        font-size: 0.7rem;
+    }
+
+    /* Booking list */
+    .bookings-list {
+        gap: 0.6rem;
+    }
+    .booking-card {
+        padding: 0.8rem;
+        border-radius: 8px;
+    }
+    .booking-card-content {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    .booking-image {
+        width: 100%;
+        height: 120px;
+    }
+    .booking-service-name {
+        font-size: 0.95rem;
+    }
+    .booking-meta {
+        flex-direction: column;
+        gap: 0.3rem;
+        font-size: 0.75rem;
+    }
+    .booking-meta span {
+        font-size: 0.75rem;
+    }
+    .booking-status {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.6rem;
+    }
+    .booking-notes {
+        font-size: 0.75rem;
+        padding: 0.5rem;
+    }
+    .booking-footer {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+        padding-top: 0.5rem;
+    }
+    .booking-actions {
+        flex-wrap: wrap;
+        gap: 0.4rem;
+    }
+    .booking-actions .btn-outline-small,
+    .booking-actions .btn-cancel-small {
+        flex: 1;
+        justify-content: center;
+        font-size: 0.7rem;
+        padding: 0.3rem 0.5rem;
+    }
+
+    /* Booking filters */
+    .booking-filters {
+        gap: 0.4rem;
+    }
+    .filter-btn {
+        padding: 0.3rem 0.6rem;
+        font-size: 0.75rem;
+        border-radius: 16px;
+        gap: 0.3rem;
+    }
+    .filter-count {
+        min-width: 16px;
+        height: 16px;
+        font-size: 0.65rem;
+        padding: 0 4px;
+    }
+
+    /* Empty state */
+    .empty-state {
+        padding: 1.5rem 1rem;
+    }
+    .empty-icon {
+        font-size: 2.5rem;
+    }
+    .empty-state h3 {
+        font-size: 1rem;
+    }
+    .empty-state p {
+        font-size: 0.8rem;
+    }
+
+    /* View all link */
+    .view-all-link {
+        font-size: 0.8rem;
+    }
+}
+
+/* ===== Very small phones: ≤360px ===== */
+@media (max-width: 360px) {
+    .profile-main {
+        padding: 0.4rem 0.3rem;
+        padding-top: 55px;
+    }
+
+    .alert {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.4rem;
+        margin-bottom: 0.4rem;
+    }
+    .alert i {
+        font-size: 0.7rem;
+    }
+
+    .profile-header {
+        padding: 0.8rem 0.6rem;
+    }
+    .avatar-circle {
+        width: 50px;
+        height: 50px;
+        font-size: 1.25rem;
+    }
+    .profile-name {
+        font-size: 1.1rem;
+    }
+    .profile-email {
+        font-size: 0.75rem;
+    }
+
+    .section-header {
+        padding: 0.6rem 0.8rem;
+    }
+    .section-header h2 {
+        font-size: 0.9rem;
+    }
+    .edit-section-btn {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.6rem;
+    }
+    .section-content {
+        padding: 0.6rem 0.6rem;
+    }
+
+    .info-item label {
+        font-size: 0.6rem;
+    }
+    .info-item p {
+        font-size: 0.75rem;
+    }
+    .edit-input {
+        padding: 0.4rem 0.5rem;
+        font-size: 0.8rem;
+    }
+
+    .btn-primary,
+    .btn-secondary,
+    .btn-outline {
+        font-size: 0.75rem;
+        padding: 0.4rem 0.8rem;
+    }
+    .btn-outline-small {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.4rem;
+    }
+
+    /* Notification header – even tighter, still right-aligned */
+    .notification-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 0.2rem;
+    }
+    .notification-header h3 {
+        font-size: 0.75rem;
+        white-space: nowrap;
+    }
+    .notification-header h3 i {
+        font-size: 0.75rem;
+    }
+    .mark-all-read-btn {
+        font-size: 0.6rem;
+        padding: 0.15rem 0.3rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .notification-item {
+        padding: 0.4rem 0.5rem;
+        font-size: 0.7rem;
+    }
+    .notification-content strong {
+        font-size: 0.75rem;
+    }
+    .notification-content p {
+        font-size: 0.65rem;
+    }
+
+    .booking-card {
+        padding: 0.6rem;
+    }
+    .booking-service-name {
+        font-size: 0.85rem;
+    }
+    .booking-meta span {
+        font-size: 0.65rem;
+    }
+    .booking-status {
+        font-size: 0.6rem;
+    }
+    .filter-btn {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.5rem;
+    }
+    .filter-count {
+        font-size: 0.55rem;
+        min-width: 14px;
+        height: 14px;
+    }
+
+    .empty-state h3 {
+        font-size: 0.9rem;
+    }
+    .empty-state p {
+        font-size: 0.7rem;
+    }
+}
+/* ========================================== 
+   QUOTATION MODAL RESPONSIVE STYLES
+   ========================================== */
+
+/* Tablet and below */
+@media (max-width: 768px) {
+    .booking-modal {
+        padding: 1rem;
+    }
+    .modal-content {
+        max-width: 95% !important;
+        width: 95% !important;
+        margin: 1rem auto;
+    }
+    .modal-header {
+        padding: 1.25rem !important;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+    .modal-icon {
+        width: 50px !important;
+        height: 50px !important;
+        font-size: 1.25rem !important;
+    }
+    .modal-title h2 {
+        font-size: 1.25rem !important;
+    }
+    .modal-subtitle {
+        font-size: 0.85rem !important;
+    }
+    .info-grid {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+    .form-row {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+}
+
+/* Small phones (480px and below) – TIGHTENED + FIXED HEADER */
+@media (max-width: 480px) {
+    .booking-modal {
+        padding: 0.25rem;
+        align-items: flex-start;
+    }
+
+    .modal-content {
+        max-width: 100% !important;
+        width: 100% !important;
+        margin: 0.25rem auto;
+        border-radius: 16px !important;
+        box-shadow: 0 12px 24px rgba(0,0,0,0.3) !important;
+        display: flex;
+        flex-direction: column;
+        max-height: 95vh;
+    }
+
+    /* ── FIXED HEADER ── */
+    .modal-header {
+        position: sticky !important;
+        top: 0 !important;
+        z-index: 20 !important;
+        padding: 0.4rem 0.5rem !important;
+        border-radius: 16px 16px 0 0 !important;
+        flex-wrap: nowrap;
+        gap: 0.25rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        flex-shrink: 0;
+    }
+    .modal-header-content {
+        gap: 0.3rem;
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* ── OVERRIDE INLINE STYLES using #bookingModal ── */
+    #bookingModal .modal-header-content .modal-icon {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 0.75rem !important;
+        border-radius: 6px !important;
+    }
+    #bookingModal .modal-title h2 {
+        font-size: 0.85rem !important;      /* Quotation Details – smaller */
+        margin: 0 !important;
+        white-space: nowrap;
+    }
+    #bookingModal .modal-title .modal-subtitle {
+        font-size: 0.5rem !important;       /* Booking # – smaller */
+        color: rgba(255,255,255,0.8) !important;
+        white-space: nowrap;
+    }
+    #bookingModal .close-btn {
+        width: 24px;
+        height: 24px;
+        font-size: 0.75rem;
+        flex-shrink: 0;
+    }
+
+    /* ── SCROLLABLE BODY ── */
+    .modal-body {
+        padding: 0.6rem;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    /* Status Banner – yellow line, now small and with proper margin */
+    .status-banner {
+        padding: 0.25rem 0.4rem !important;
+        font-size: 0.6rem !important;
+        margin: 0.1rem 0 0.5rem 0 !important;
+        border-radius: 4px !important;
+        background: #fff3cd !important;
+        color: #856404 !important;
+        border-left: 3px solid #ffc107 !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 0.3rem !important;
+    }
+    .status-banner i {
+        font-size: 0.6rem !important;
+    }
+
+    /* Service Card */
+    .service-card {
+        padding: 0.4rem 0.5rem;
+        margin-bottom: 0.5rem;
+        flex-direction: row;
+        align-items: center;
+        text-align: left;
+        gap: 0.5rem;
+    }
+    .service-icon {
+        width: 28px;
+        height: 28px;
+        font-size: 0.75rem;
+        flex-shrink: 0;
+    }
+    .service-details h3 {
+        font-size: 0.8rem;
+        margin-bottom: 0.15rem;
+    }
+    .service-tags {
+        gap: 0.2rem;
+        flex-wrap: wrap;
+    }
+    .tag {
+        font-size: 0.55rem;
+        padding: 0.1rem 0.3rem;
+    }
+    .tag i {
+        font-size: 0.5rem;
+    }
+
+    /* Info Grid */
+    .info-grid {
+        grid-template-columns: 1fr;
+        gap: 0.3rem;
+        margin-bottom: 0.5rem;
+    }
+    .info-card {
+        padding: 0.35rem 0.4rem;
+        flex-direction: row;
+        gap: 0.4rem;
+        align-items: center;
+    }
+    .info-icon {
+        width: 24px;
+        height: 24px;
+        font-size: 0.7rem;
+        flex-shrink: 0;
+    }
+    .info-content label {
+        font-size: 0.5rem;
+        margin-bottom: 0;
+    }
+    .info-content span {
+        font-size: 0.7rem;
+    }
+
+    /* Section Header Edit */
+    .section-header-edit {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.4rem;
+        margin: 0.4rem 0 0.3rem 0;
+    }
+    .section-header-edit i {
+        font-size: 0.65rem;
+    }
+
+    /* Form Elements */
+    .form-row {
+        grid-template-columns: 1fr;
+        gap: 0.4rem;
+    }
+    .form-group {
+        margin-bottom: 0.4rem;
+    }
+    .input-label {
+        font-size: 0.6rem;
+        margin-bottom: 0.1rem;
+    }
+    .input-label i {
+        font-size: 0.55rem;
+    }
+    .input-wrapper input,
+    .input-wrapper select,
+    .input-wrapper textarea {
+        padding: 0.35rem 0.4rem;
+        font-size: 0.7rem;
+        border-radius: 4px;
+    }
+    .input-wrapper textarea {
+        min-height: 40px;
+    }
+    .edit-hint {
+        font-size: 0.5rem;
+        margin-top: 0.1rem;
+    }
+    .edit-hint i {
+        font-size: 0.45rem;
+    }
+    .optional {
+        font-size: 0.5rem;
+    }
+
+    /* Admin Notice */
+    .admin-notice {
+        padding: 0.4rem;
+        margin-top: 0.4rem;
+        border-radius: 4px;
+    }
+    .notice-icon {
+        width: 24px;
+        height: 24px;
+        font-size: 0.7rem;
+    }
+    .notice-content strong {
+        font-size: 0.7rem;
+    }
+    .notice-content span {
+        font-size: 0.6rem;
+    }
+
+    /* Modal Actions */
+    .modal-actions {
+        flex-direction: column;
+        gap: 0.3rem;
+        margin-top: 0.4rem;
+    }
+    .btn-save,
+    .btn-close-modal {
+        width: 100%;
+        padding: 0.5rem 0.6rem !important;
+        border-radius: 6px !important;
+        justify-content: center;
+    }
+    .btn-icon {
+        font-size: 0.75rem;
+    }
+    .btn-main-text {
+        font-size: 0.75rem;
+    }
+    .btn-sub-text {
+        font-size: 0.55rem;
+    }
+}
+
+/* Extra small phones (360px and below) – even tighter */
+@media (max-width: 360px) {
+    .modal-content {
+        border-radius: 12px !important;
+        margin: 0.1rem auto;
+        max-height: 98vh;
+    }
+    .modal-header {
+        padding: 0.3rem 0.4rem !important;
+    }
+    #bookingModal .modal-header-content .modal-icon {
+        width: 22px !important;
+        height: 22px !important;
+        font-size: 0.6rem !important;
+    }
+    #bookingModal .modal-title h2 {
+        font-size: 0.75rem !important;
+    }
+    #bookingModal .modal-title .modal-subtitle {
+        font-size: 0.7rem !important;
+    }
+    #bookingModal .close-btn {
+        width: 20px;
+        height: 20px;
+        font-size: 0.6rem;
+    }
+    .modal-body {
+        padding: 0.4rem;
+    }
+
+    .status-banner {
+        font-size: 0.5rem !important;
+        padding: 0.15rem 0.3rem !important;
+        margin: 0.05rem 0 0.3rem 0 !important;
+    }
+    .status-banner i {
+        font-size: 0.5rem !important;
+    }
+
+    .service-card {
+        padding: 0.3rem 0.4rem;
+    }
+    .service-details h3 {
+        font-size: 0.7rem;
+    }
+    .tag {
+        font-size: 0.45rem;
+        padding: 0.05rem 0.2rem;
+    }
+    .info-card {
+        padding: 0.25rem 0.3rem;
+    }
+    .info-content label {
+        font-size: 0.45rem;
+    }
+    .info-content span {
+        font-size: 0.6rem;
+    }
+    .input-label {
+        font-size: 0.5rem;
+    }
+    .input-wrapper input,
+    .input-wrapper select,
+    .input-wrapper textarea {
+        padding: 0.25rem 0.3rem;
+        font-size: 0.65rem;
+    }
+    .btn-save,
+    .btn-close-modal {
+        padding: 0.4rem 0.5rem !important;
+    }
+    .btn-main-text {
+        font-size: 0.65rem;
+    }
+    .btn-sub-text {
+        font-size: 0.45rem;
+    }
+}

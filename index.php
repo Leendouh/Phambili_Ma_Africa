@@ -1,0 +1,846 @@
+<?php
+// Start session and include database connection
+require_once 'includes/config_session.inc.php';
+require_once 'includes/dbh.inc.php';
+require_once 'includes/service_model.inc.php';
+require_once 'includes/product_model.inc.php';
+
+// Get user data if logged in
+$user_id = $_SESSION['user_id'] ?? null;
+$user_name = $_SESSION['user_name'] ?? '';
+$user_role = $_SESSION['user_role'] ?? '';
+
+// Check user login status
+$is_logged_in = isset($_SESSION['user_id']);
+$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
+$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
+$user_email = $_SESSION['user_email'] ?? '';
+
+// Fetch notifications for customer
+$notifications = [];
+$unreadCount = 0;
+if ($is_customer && $user_id) {
+    require_once 'includes/notifications_model.inc.php';
+    $notifications = get_notifications($pdo, $user_id, 'customer', true, 5);
+    $unreadCount = get_unread_notification_count($pdo, $user_id, 'customer');
+}
+
+// Fetch data from database
+try {
+    $services = getAvailableServices($pdo);
+    $products = getAvailableProducts($pdo);
+} catch (PDOException $e) {
+    $services = [];
+    $products = [];
+    error_log("Database error: " . $e->getMessage());
+}
+
+// Get cart count from session or localStorage (will be handled by JS)
+$cart_count = 0;
+
+?>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Phambili Ma-Africa | Professional Cleaning Services</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="images/PM-Logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="./css/style.css">
+    <link rel="stylesheet" href="./css/social-media.css">
+</head>
+
+<body class="index-page" data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+    <!-- Updated Header Section -->
+    <header class="header">
+        <!-- Hamburger Menu Button -->
+        <button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle menu">
+            <img src="images/menu.png" alt="Close">
+        </button>
+
+        <!-- Logo -->
+        <div class="logo">
+            <a href="index.php">
+                <img src="images/PM-LogoB.png" alt="Phambili Ma-Africa Logo">
+            </a>
+        </div>
+
+        <!-- Icons (Right) -->
+        <div class="header-icons">
+            <?php if ($is_customer && $user_id): ?>
+                <!-- Notification Bell -->
+                <div class="notification-bell-customer">
+                    <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
+                        <i class="fas fa-bell"></i>
+                        <?php if ($unreadCount > 0): ?>
+                            <span class="notification-badge-customer"><?php echo $unreadCount; ?></span>
+                        <?php endif; ?>
+                    </button>
+                    <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
+                        <div class="notification-dropdown-header">
+                            <h4>Notifications</h4>
+                            <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
+                        </div>
+                        <div class="notification-dropdown-content">
+                            <?php if (empty($notifications)): ?>
+                                <div class="no-notifications">
+                                    <i class="fas fa-bell-slash"></i>
+                                    <p>No new notifications</p>
+                                </div>
+                            <?php else: ?>
+                                <?php foreach ($notifications as $notif): ?>
+                                    <div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
+                                        <div class="notif-content">
+                                            <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
+                                            <p><?php echo htmlspecialchars($notif['message']); ?></p>
+                                            <small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
+                                        </div>
+                                        <button class="notif-close" onclick="markCustomerNotificationRead(<?php echo $notif['ID']; ?>)">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            <?php endif; ?>
+            <?php if ($is_logged_in): ?>
+                <!-- User Profile Dropdown (shown when logged in) -->
+                <div class="user-profile-dropdown" id="user-profile-dropdown">
+                    <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
+                        <img src="images/user.png" alt="User" class="icon" id="user-icon">
+                    </button>
+                    <div class="profile-dropdown-menu" id="profile-dropdown-menu">
+                        <?php if ($is_admin): ?>
+                            <!-- Admin Profile Dropdown -->
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user-shield admin-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Administrator'); ?></span>
+                                    <span class="profile-role">Admin</span>
+                                </div>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="admin_dashboard.php" class="dropdown-link">
+                                    <i class="fas fa-tachometer-alt"></i>
+                                    Admin Dashboard
+                                </a>
+                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
+                        <?php elseif ($is_customer): ?>
+                            <!-- Customer Profile Dropdown -->
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user customer-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Customer'); ?></span>
+                                    <span class="profile-role">Customer</span>
+                                </div>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="bookings.php" class="dropdown-link">
+                                    <i class="fas fa-calendar-check"></i>
+                                    Bookings
+                                </a>
+                                <a href="profile.php" class="dropdown-link">
+                                    <i class="fas fa-user"></i>
+                                    Profile
+                                </a>
+                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php else: ?>
+                <!-- Guest: Icon redirects to login page -->
+                <a href="login.php" class="icon-link" aria-label="Login/Register">
+                    <img src="images/user.png" alt="Login" class="icon">
+                </a>
+            <?php endif; ?>
+            <button class="cart-btn" id="cart-btn" aria-label="Shopping Cart">
+                <img src="images/shopping-bag.png" alt="" class="icon">
+                <?php if (isset($_SESSION["user_id"])): ?>
+                    <span class="cart-badge">0</span>
+                <?php endif; ?>
+            </button>
+        </div>
+    </header>
+
+    <!-- Overlay (must be outside header but before sidebars) -->
+    <div class="menu-overlay" id="menu-overlay"></div>
+
+    <!-- Navigation Sidebar (Left) -->
+    <nav class="main-nav" id="main-nav">
+        <div class="nav-header">
+            <div class="nav-logo">
+                <img src="images/PM-LogoB.png" alt="Phambili Ma-Africa Logo">
+            </div>
+            <button class="close-nav-btn" id="close-nav-btn" aria-label="Close menu">
+                <svg viewBox="0 0 24 24" width="30" height="30">
+                    <path fill="currentColor"
+                        d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                </svg>
+            </button>
+        </div>
+        <!-- In your navigation menu -->
+        <ul class="nav-list">
+            <li class="nav-item"><a href="index.php" class="nav-link">Home</a></li>
+            <li class="nav-item"><a href="about.php" class="nav-link"> About</a></li>
+            <li class="nav-item"><a href="contact.php" class="nav-link">Contact</a></li>
+            <li class="nav-item"><a href="services.php" class="nav-link"> Services</a></li>
+            <li class="nav-item"><a href="products.php" class="nav-link"> Products</a></li>
+
+            <!-- Dynamic navigation based on role -->
+            <?php if ($is_admin): ?>
+                <!-- Admin sees Admin Dashboard link instead of Login -->
+                <li class="nav-item">
+                    <a href="admin_dashboard.php" class="nav-link admin-nav-link">
+                        Admin Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                </li>
+            <?php elseif ($is_customer): ?>
+                <!-- Customer sees Profile and Logout -->
+                <li class="nav-item">
+                    <a href="bookings.php" class="nav-link">
+                        Bookings
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="profile.php" class="nav-link">
+                        Profile
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                </li>
+            <?php else: ?>
+                <!-- Guest sees Login -->
+                <li class="nav-item">
+                    <a href="login.php" class="nav-link"> Log In</a>
+                </li>
+            <?php endif; ?>
+
+            <li class="nav-item">
+                <a href="booking.php" class="nav-link book-now-btn ">
+                    Book Now
+                </a>
+            </li>
+        </ul>
+        <div class="nav-footer">
+            <div class="social-links">
+                <a href="https://www.facebook.com/people/Phambili-Ma-Africa/100063507009282/" target="_blank"
+                    aria-label="Facebook">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        class="bi bi-facebook" viewBox="0 0 16 16">
+                        <path
+                            d="M16 8.049c0-4.446-3.582-8.05-8-8.05C3.58 0-.002 3.603-.002 8.05c0 4.017 2.926 7.347 6.75 7.951v-5.625h-2.03V8.05H6.75V6.275c0-2.017 1.195-3.131 3.022-3.131.876 0 1.791.157 1.791.157v1.98h-1.009c-.993 0-1.303.621-1.303 1.258v1.51h2.218l-.354 2.326H9.25V16c3.824-.604 6.75-3.934 6.75-7.951" />
+                    </svg>
+                </a>
+                <a href="https://www.instagram.com/phambilimaafrica?utm_source=ig_web_button_share_sheet&igsh=ZDNlZDc0MzIxNw=="
+                    target="_blank" aria-label="Instagram">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        class="bi bi-instagram" viewBox="0 0 16 16">
+                        <path
+                            d="M8 0C5.829 0 5.556.01 4.703.048 3.85.088 3.269.222 2.76.42a3.9 3.9 0 0 0-1.417.923A3.9 3.9 0 0 0 .42 2.76C.222 3.268.087 3.85.048 4.7.01 5.555 0 5.827 0 8.001c0 2.172.01 2.444.048 3.297.04.852.174 1.433.372 1.942.205.526.478.972.923 1.417.444.445.89.719 1.416.923.51.198 1.09.333 1.942.372C5.555 15.99 5.827 16 8 16s2.444-.01 3.298-.048c.851-.04 1.434-.174 1.943-.372a3.9 3.9 0 0 0 1.416-.923c.445-.445.718-.891.923-1.417.197-.509.332-1.09.372-1.942C15.99 10.445 16 10.173 16 8s-.01-2.445-.048-3.299c-.04-.851-.175-1.433-.372-1.941a3.9 3.9 0 0 0-.923-1.417A3.9 3.9 0 0 0 13.24.42c-.51-.198-1.092-.333-1.943-.372C10.443.01 10.172 0 7.998 0zm-.717 1.442h.718c2.136 0 2.389.007 3.232.046.78.035 1.204.166 1.486.275.373.145.64.319.92.599s.453.546.598.92c.11.281.24.705.275 1.485.039.843.047 1.096.047 3.231s-.008 2.389-.047 3.232c-.035.78-.166 1.203-.275 1.485a2.5 2.5 0 0 1-.599.919c-.28.28-.546.453-.92.598-.28.11-.704.24-1.485.276-.843.038-1.096.047-3.232.047s-2.39-.009-3.233-.047c-.78-.036-1.203-.166-1.485-.276a2.5 2.5 0 0 1-.92-.598 2.5 2.5 0 0 1-.6-.92c-.109-.281-.24-.705-.275-1.485-.038-.843-.046-1.096-.046-3.233s.008-2.388.046-3.231c.036-.78.166-1.204.276-1.486.145-.373.319-.64.599-.92s.546-.453.92-.598c.282-.11.705-.24 1.485-.276.738-.034 1.024-.044 2.515-.045zm4.988 1.328a.96.96 0 1 0 0 1.92.96.96 0 0 0 0-1.92m-4.27 1.122a4.109 4.109 0 1 0 0 8.217 4.109 4.109 0 0 0 0-8.217m0 1.441a2.667 2.667 0 1 1 0 5.334 2.667 2.667 0 0 1 0-5.334" />
+                    </svg>
+                </a>
+                <a href="https://www.linkedin.com/in/phambili-ma-africa-8256a4151" target="_blank"
+                    aria-label="LinkedIn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        class="bi bi-linkedin" viewBox="0 0 16 16">
+                        <path
+                            d="M0 1.146C0 .513.526 0 1.175 0h13.65C15.474 0 16 .513 16 1.146v13.708c0 .633-.526 1.146-1.175 1.146H1.175C.526 16 0 15.487 0 14.854V1.146zm4.943 12.248V6.169H2.542v7.225zm-1.2-8.212c.837 0 1.358-.554 1.358-1.248-.015-.709-.52-1.248-1.342-1.248S2.4 3.226 2.4 3.934c0 .694.521 1.248 1.327 1.248zm4.908 8.212V9.359c0-.216.016-.432.08-.586.173-.431.568-.878 1.232-.878.869 0 1.216.662 1.216 1.634v3.865h2.401V9.25c0-2.22-1.184-3.252-2.764-3.252-1.274 0-1.845.7-2.165 1.193v.025h-.016l.016-.025V6.169h-2.4c.03.678 0 7.225 0 7.225z" />
+                    </svg>
+                </a>
+                <a href="https://www.tiktok.com/@user7297605414365" target="_blank" aria-label="TikTok">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                        class="bi bi-tiktok" viewBox="0 0 16 16">
+                        <path
+                            d="M9 0h1.98c.144.715.54 1.617 1.235 2.512C12.895 3.389 13.797 4 15 4v2c-1.753 0-3.07-.814-4-1.829V11a5 5 0 1 1-5-5v2a3 3 0 1 0 3 3z" />
+                    </svg>
+                </a>
+            </div>
+            <p class="copyright">&copy; <span id="current-year"></span> Phambili Ma-Africa. All rights reserved.</p>
+        </div>
+    </nav>
+
+    <!-- Cart Sidebar (Right) -->
+    <aside class="cart-sidebar" id="cart-sidebar">
+        <div class="cart-header">
+            <h3 class="cart-title">Your Shopping Cart</h3>
+            <button class="close-cart-btn" id="close-cart-btn" aria-label="Close cart">
+                <svg viewBox="0 0 24 24" width="30" height="30">
+                    <path fill="currentColor"
+                        d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                </svg>
+            </button>
+        </div>
+        <div class="cart-items" id="cart-items">
+            <div class="empty-cart">
+                <svg viewBox="0 0 24 24" width="48" height="48">
+                    <path fill="currentColor"
+                        d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z" />
+                </svg>
+                <p>Your cart is empty</p>
+            </div>
+        </div>
+        <div class="cart-footer">
+            <div class="cart-summary">
+                <div class="cart-subtotal">
+                    <span>Subtotal</span>
+                    <span class="cart-total" id="cart-total">R0.00</span>
+                </div>
+                <p class="cart-shipping">Shipping & taxes calculated at checkout</p>
+            </div>
+            <a href="#checkout.php" class="checkout-btn" id="checkout-btn">Proceed to Checkout</a>
+            <div class="cart-payment-methods">
+                <svg viewBox="0 0 38 24" width="38" height="24">
+                    <path fill="#5A6988"
+                        d="M35 0H3C1.3 0 0 1.3 0 3v18c0 1.7 1.4 3 3 3h32c1.7 0 3-1.3 3-3V3c0-1.7-1.4-3-3-3z" />
+                    <path fill="#fff" d="M35 1c1.1 0 2 .9 2 2v18c0 1.1-.9 2-2 2H3c-1.1 0-2-.9-2-2V3c0-1.1.9-2 2-2h32" />
+                    <path fill="#172B85"
+                        d="M8.6 12c0-1.7 1.3-3 3-3h5.3c1.7 0 3 1.3 3 3s-1.3 3-3 3h-5.3c-1.7 0-3-1.3-3-3z" />
+                    <path fill="#FF5F00" d="M30.9 16h-6.3v-8h6.3v8z" />
+                    <path fill="#EB001B"
+                        d="M25.1 12c0-2.2 1.1-4.1 2.8-5.2-1.2-1.1-2.8-1.8-4.5-1.8-3.1 0-5.7 2.5-5.7 5.7s2.5 5.7 5.7 5.7c1.7 0 3.3-.7 4.5-1.8-1.7-1.1-2.8-3-2.8-5.2z" />
+                    <path fill="#F79E1B"
+                        d="M37 12c0 2.2-1.1 4.1-2.8 5.2 1.2 1.1 2.8 1.8 4.5 1.8 3.1 0 5.7-2.5 5.7-5.7s-2.5-5.7-5.7-5.7c-1.7 0-3.3.7-4.5 1.8 1.7 1.1 2.8 3 2.8 5.2z" />
+                </svg>
+                <span>Secure Payment</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>Professional Cleaning Services</h1>
+                <p>Phambili Ma-Africa provides exceptional cleaning services for homes and businesses. Our trained
+                    professionals deliver quality cleaning solutions tailored to your needs.</p>
+                <div class="hero-buttons">
+                    <a href="booking.php" class="btn">Book Now</a>
+                    <a href="services.php" class="btn btn-secondary">Our Services</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Fixed Home Services and Products Summary Section -->
+    <!-- DEBUG: Services loaded: <?php echo count($services); ?>, Products loaded: <?php echo count($products); ?> -->
+    <section class="home-services-summary" aria-labelledby="home-services-title">
+        <div class="home-services-header animate-on-scroll" id="home-services-title">
+            <div class="index-quote-header">
+                <h1 class="index-quote-title animate-stagger">Our Services & Products at a Glance</h1>
+                <p class="home-services-subtitle animate-stagger">Click on any item to explore detailed information and pricing</p>
+            </div>
+        </div>
+
+        <div class="home-carousel-wrapper">
+            <button class="home-carousel-prev" aria-label="Previous items" id="carousel-prev">
+                <svg viewBox="0 0 24 24" width="24" height="24">
+                    <path fill="currentColor" d="M15.41,16.58L10.83,12L15.41,7.41L14,6L8,12L14,18L15.41,16.58Z" />
+                </svg>
+            </button>
+
+            <div class="home-carousel-container">
+                <div class="home-services-bar" id="home-services-bar">
+                    <?php if (!empty($services) || !empty($products)): ?>
+                        <?php if (!empty($services)): ?>
+                            <?php foreach ($services as $service): ?>
+                                <a href="services.php?id=<?php echo htmlspecialchars($service['ID']); ?>" class="home-service-card">
+                                    <div class="home-card-image">
+                                        <?php if (!empty($service['Image_URL'])): ?>
+                                            <img src="<?php echo htmlspecialchars($service['Image_URL']); ?>" alt="<?php echo htmlspecialchars($service['Name']); ?>">
+                                        <?php else: ?>
+                                            <i class="fas fa-broom"></i>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="home-service-info">
+                                        <h3><?php echo htmlspecialchars($service['Name']); ?></h3>
+                                        <span class="home-service-cta">Learn More <i class="fas fa-arrow-right"></i></span>
+                                    </div>
+                                </a>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                        <?php if (!empty($products)): ?>
+                            <?php foreach ($products as $product): ?>
+                                <div class="home-service-card product-card" data-product-id="<?php echo htmlspecialchars($product['ID']); ?>">
+                                    <div class="home-card-image">
+                                        <?php if (!empty($product['Image_URL'])): ?>
+                                            <img src="<?php echo htmlspecialchars($product['Image_URL']); ?>" alt="<?php echo htmlspecialchars($product['Name']); ?>">
+                                        <?php else: ?>
+                                            <i class="fas fa-spray-can"></i>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="home-service-info">
+                                        <h3><?php echo htmlspecialchars($product['Name']); ?></h3>
+                                        <p class="product-price">R<?php echo number_format($product['Price'], 2); ?></p>
+                                        <button class="home-service-cta add-to-cart-btn" data-product-id="<?php echo htmlspecialchars($product['ID']); ?>" data-product-name="<?php echo htmlspecialchars($product['Name']); ?>" data-product-price="<?php echo $product['Price']; ?>">
+                                            <i class="fas fa-shopping-cart"></i> Add to Cart
+                                        </button>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <div class="loading-state">
+                            <p>No services or products available at the moment.</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <button class="home-carousel-next" aria-label="Next items" id="carousel-next">
+                <svg viewBox="0 0 24 24" width="24" height="24">
+                    <path fill="currentColor" d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z" />
+                </svg>
+            </button>
+        </div>
+        <div class="home-carousel-progress">
+            <div class="home-progress-bar" id="progress-bar"></div>
+        </div>
+    </section>
+
+    <!-- Clients Section -->
+    <section class="clients-section">
+        <div class="index-quote-header animate-on-scroll">
+            <h1 class="index-quote-title animate-stagger">Our Trusted Clients</h1>
+            <p class="home-services-subtitle animate-stagger">Proud to have worked with these amazing organizations and individuals</p>
+        </div>
+        <div class="clients-scroll-container">
+            <div class="clients-scroll-wrapper">
+                <div class="clients-scroll-track">
+                    <!-- First set of clients -->
+                     <div class="client-item"><span class="client-name">Nadal attorneys</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Bonfiglioli</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Vharisanani</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item">
+                        <span class="client-name">Go!</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">Gear Guards Rentals</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Orlando Assembly of God</span><span class="client-category">Church</span></div>
+                    <div class="client-item"><span class="client-name">Phiri-Mapetla Assembly of God</span><span class="client-category">Church</span></div>
+                    <div class="client-item">
+                        <span class="client-name">The Polygamist</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">The Apostolic Faith Mission</span><span class="client-category">Church</span></div>
+                    <div class="client-item"><span class="client-name">Cosmo City Assembly of God</span><span class="client-category">Church</span></div>
+                    <div class="client-item"><span class="client-name">Nomzamo Bottle Store</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item">
+                        <span class="client-name">Heavy Hearts</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">Kido Events</span><span class="client-category">Events</span></div>
+                    <div class="client-item"><span class="client-name">Maju Stars Learning Centre</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Zackariya Park High School</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item">
+                        <span class="client-name">Bad Influence</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">Wardens</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Dalisto</span><span class="client-category">Private Company</span></div>
+                    <!-- Duplicate for seamless loop -->
+                     <div class="client-item"><span class="client-name">Nadal attorneys</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Bonfiglioli</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Vharisanani</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item">
+                        <span class="client-name">Go!</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">Gear Guards Rentals</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Orlando Assembly of God</span><span class="client-category">Church</span></div>
+                    <div class="client-item"><span class="client-name">Phiri-Mapetla Assembly of God</span><span class="client-category">Church</span></div>
+                    <div class="client-item">
+                        <span class="client-name">The Polygamist</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">The Apostolic Faith Mission</span><span class="client-category">Church</span></div>
+                    <div class="client-item"><span class="client-name">Cosmo City Assembly of God</span><span class="client-category">Church</span></div>
+                    <div class="client-item"><span class="client-name">Nomzamo Bottle Store</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item">
+                        <span class="client-name">Heavy Hearts</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">Kido Events</span><span class="client-category">Events</span></div>
+                    <div class="client-item"><span class="client-name">Maju Stars Learning Centre</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Zackariya Park High School</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item">
+                        <span class="client-name">Bad Influence</span>
+                        <span class="client-source">From <img src="https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg" alt="Netflix" class="netflix-logo"></span>
+                    </div>
+                    <div class="client-item"><span class="client-name">Wardens</span><span class="client-category">Private Company</span></div>
+                    <div class="client-item"><span class="client-name">Dalisto</span><span class="client-category">Private Company</span></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials Section -->
+    <section class="testimonials">
+        <div class="container">
+            <div class="index-quote-header animate-on-scroll">
+                <h1 class="index-quote-title animate-stagger">What Our Clients Say</h1>
+            </div>
+            <div class="testimonial-grid">
+                <!-- Testimonial 1 -->
+                <a href="https://www.google.com/search?q=Phambili+Ma+Africa+Trading+Enterprise+Reviews" target="_blank" class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p class="testimonial-text">I am extremely impressed with the carpet cleaning service I received. The cleaner was punctual, professional, and very thorough. My carpet had several stubborn stains and heavy traffic marks, but after the cleaning it looks and smells fresh again almost like new.</p>
+                        <div class="testimonial-author">
+                            <div class="author-info">
+                                <h4>Tami Twala</h4>
+                                <span class="testimonial-date">2 months ago</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="testimonial-rating" data-rating="5">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                </a>
+
+                <!-- Testimonial 2 -->
+                <a href="https://www.google.com/search?q=Phambili+Ma+Africa+Trading+Enterprise+Reviews" target="_blank" class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p class="testimonial-text">I had requested a couch cleaning service and all I can is what a great
+                            job. The service of actually cleaning the couches has restored them to its original state(colour
+                            and look) but the after care was also great, the team waited for the couches to dry so they can
+                            put them in. They care for their work and you as a client.</p>
+                        <div class="testimonial-author">
+                            <div class="author-info">
+                                <h4>Khanyisile Mafora</h4>
+                                <span class="testimonial-date">a year ago</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="testimonial-rating" data-rating="5">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                </a>
+                <!-- Testimonial 3 -->
+                <a href="https://www.google.com/search?q=Phambili+Ma+Africa+Trading+Enterprise+Reviews" target="_blank" class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p class="testimonial-text">Hi this Guys or can I say a company they know what they doing I called them 10:45 by 12 they were already at my house doing the job I was not even home they clean my sofa very clean and quick like they make my day just call them they will amaze you before you know it Keep up the good work</p>
+                        <div class="testimonial-author">
+                            <div class="author-info">
+                                <h4>Fikile Khumalo</h4>
+                                <span class="testimonial-date">a year ago</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="testimonial-rating" data-rating="5">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                </a>
+                <!-- Testimonial 4 -->
+                <a href="https://www.google.com/search?q=Phambili+Ma+Africa+Trading+Enterprise+Reviews" target="_blank" class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p class="testimonial-text">Phambili ma Africa exceeded my expectations.They managed to strip off polish build up that was there for many years. It was so stubborn to remove.For all your cleaning needs, don’t hesitate to call them.
+                            Happy Client😜.</p>
+                        <div class="testimonial-author">
+                            <div class="author-info">
+                                <h4>Gugu Mabizela</h4>
+                                <span class="testimonial-date"> 9 months ago</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="testimonial-rating" data-rating="5">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                </a>
+                <!-- Testimonial 5 -->
+                <a href="https://www.google.com/search?q=Phambili+Ma+Africa+Trading+Enterprise+Reviews" target="_blank" class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p class="testimonial-text">Their service is immaculate and there is constant communication/updates
+                            on their progress. I am happy with how clean my carpets look I would definitely recommend</p>
+                        <div class="testimonial-author">
+                            <div class="author-info">
+                                <h4>Tsholofelo Legodi</h4>
+                                <span class="testimonial-date">6 months ago</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="testimonial-rating" data-rating="5">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                </a>
+
+                <!-- Testimonial 6 -->
+                <a href="https://www.google.com/search?q=Phambili+Ma+Africa+Trading+Enterprise+Reviews" target="_blank" class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p class="testimonial-text">Phambili Ma Africa. Came and gave us the best service ever. The staff was friendly and very professional and not to mention they left our sofas .good as new , bright and beautiful..
+                            Thank so much
+                            Phambili Ma Africa</p>
+                        <div class="testimonial-author">
+                            <div class="author-info">
+                                <h4>Innocentia Twala</h4>
+                                <span class="testimonial-date">8 months ago</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="testimonial-rating" data-rating="5">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                </a>
+
+
+
+            </div>
+
+            <div class="testimonial-more-link">
+                <a href="https://www.google.com/maps/place/Phambili+Ma+Africa+Trading+Enterprise/@-26.2741437,27.8553979,17z/data=!4m18!1m9!3m8!1s0x1e95a77271519911:0x605a014715e5f0d4!2sPhambili+Ma+Africa+Trading+Enterprise!8m2!3d-26.2742274!4d27.8553272!9m1!1b1!16s%2Fg%2F11qgkx_y44?hl=en&entry=ttu&g_ep=EgoyMDI2MDQyMC4wIKXMDSoASAFQAw%3D%3D" target="_blank" class="more-comments-btn">
+                    <i class="fas fa-comment-alt"></i> More Comments
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Index Quote Request Section -->
+    <section id="index-quote" class="index-quote-section">
+        <div class="index-quote-header animate-on-scroll">
+            <h1 class="index-quote-title animate-stagger">Request a Quotation</h1>
+            <p class="index-quote-subtitle animate-stagger">Need a customized cleaning solution? Request a free, no-obligation quote.
+            </p>
+        </div>
+
+        <div class="index-quote-container animate-on-scroll">
+            <div class="index-quote-form-wrapper">
+
+                <!-- Main Form -->
+                <div class="index-quote-form">
+                    <p class="index-quote-description animate-stagger">
+                        Get a personalized quote for your cleaning needs. Our team will assess your requirements and
+                        provide you with a competitive estimate.
+                    </p>
+
+                    <p class="index-quote-note animate-stagger">
+                        <strong>Why choose us?</strong><br>
+                        &check; Free consultation and quote<br>
+                        &check; Professional and experienced team<br>
+                        &check; Eco-friendly cleaning products<br>
+                        &check; Flexible scheduling
+                    </p>
+                    <div class="index-form-submit">
+                        <button type="button" class="index-quote-btn" onclick="window.location.href='booking.php'">
+                            <span>Request Quote</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor"
+                                viewBox="0 0 16 16">
+                                <path fill-rule="evenodd"
+                                    d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- Footer -->
+    <footer class="site-footer">
+        <div class="footer-container">
+            <!-- Company Info -->
+            <div class="footer-section company-info">
+                <div class="footer-logo">
+                    <a href="index.php">
+                        <img src="images/PM-LogoB.png" alt="Phambili Ma-Africa Logo" loading="lazy">
+                    </a>
+                </div>
+                <p class="footer-motto">It will never be the same again</p>
+
+                <div class="social-links">
+                    <a href="https://www.facebook.com/people/Phambili-Ma-Africa/100063507009282/" target="_blank" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
+                    <a href="https://www.instagram.com/phambilimaafrica" target="_blank" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+                    <a href="https://www.linkedin.com/in/phambili-ma-africa-8256a4151" target="_blank" aria-label="LinkedIn"><i class="fab fa-linkedin-in"></i></a>
+                    <a href="https://www.tiktok.com/@user7297605414365" target="_blank" aria-label="TikTok"><i class="fab fa-tiktok"></i></a>
+                </div>
+            </div>
+
+            <!-- Quick Links -->
+            <div class="footer-section quick-links">
+                <h3 class="footer-heading">Quick Links</h3>
+                <ul class="quick-links-list">
+                    <li><a href="index.php"><i class="fas fa-chevron-right"></i> Home</a></li>
+                    <li><a href="about.php"><i class="fas fa-chevron-right"></i> About Us</a></li>
+                    <li><a href="contact.php"><i class="fas fa-chevron-right"></i> Contact</a></li>
+                    <li><a href="services.php"><i class="fas fa-chevron-right"></i> Services</a></li>
+                    <li><a href="products.php"><i class="fas fa-chevron-right"></i> Products</a></li>
+                </ul>
+            </div>
+
+            <!-- Services -->
+            <div class="footer-section services">
+                <h3 class="footer-heading">Our Services</h3>
+                <div class="footer-services-grid">
+                    <ul>
+                        <li><a href="services.php"> Standard & Deep Cleaning</a></li>
+                        <li><a href="services.php"> Office Cleaning</a></li>
+                        <li><a href="services.php"> Window Cleaning</a></li>
+                        <li><a href="services.php"> Carpet Cleaning</a></li>
+                    </ul>
+                    <ul>
+                        <li><a href="products.php"> Cleaning Products</a></li>
+                        <li><a href="services.php"> Pest Control</a></li>
+                        <li><a href="services.php"> Fumigation</a></li>
+                        <li><a href="services.php"> Disinfecting</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Contact Info -->
+            <div class="footer-section contact-info">
+                <h3 class="footer-heading">Contact Us</h3>
+                <ul class="contact-details">
+                    <li> 2676 Isikhwama Street, Phiri Extension, Phiri, Soweto, 1818</li>
+                    <li><a href="tel:+27726625951">+27 72 662 5951</a></li>
+                    <li><a href="tel:+27609707444">+27 60 970 7444</a></li>
+                    <li><a href="mailto:info@phambilimaafrica.co.za">info@phambilimaafrica.co.za</a></li>
+                    <li> Open 24 hours</li>
+                </ul>
+            </div>
+        </div>
+        <!-- Footer Bottom -->
+        <div class="footer-bottom">
+            <div class="footer-bottom-container">
+                <p>RELM TECHNOLOGIES DEVELOPERS</p>
+                <div class="legal-links">
+                    <a href="privacy.php">Privacy Policy</a>
+                    <a href="terms.php">Terms of Service</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Back to Top Button -->
+        <button class="back-to-top" aria-label="Back to top">
+            <i class="fas fa-arrow-up"></i>
+        </button>
+    </footer>
+
+    <script src="./js/config.js"></script>
+    <script src="./js/script.js"></script>
+    <script>
+        // Customer notification dropdown functionality
+        function toggleCustomerNotificationDropdown() {
+            const dropdown = document.getElementById('notificationDropdownCustomer');
+            if (dropdown) {
+                dropdown.classList.toggle('active');
+            }
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const notificationBell = document.querySelector('.notification-bell-customer');
+            if (notificationBell && !notificationBell.contains(event.target)) {
+                const dropdown = document.getElementById('notificationDropdownCustomer');
+                if (dropdown) {
+                    dropdown.classList.remove('active');
+                }
+            }
+        });
+
+        // Mark individual notification as read
+        async function markCustomerNotificationRead(notificationId) {
+            try {
+                const response = await fetch('api/notification_actions.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'mark_read',
+                        notification_id: notificationId
+                    })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
+                    if (notifItem) {
+                        notifItem.style.opacity = '0';
+                        setTimeout(() => notifItem.remove(), 300);
+                    }
+                    // Update badge count
+                    const badge = document.querySelector('.notification-badge-customer');
+                    if (badge) {
+                        const currentCount = parseInt(badge.textContent);
+                        if (currentCount > 1) {
+                            badge.textContent = currentCount - 1;
+                        } else {
+                            badge.remove();
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // Mark all notifications as read
+        async function markAllCustomerNotificationsRead() {
+            try {
+                const response = await fetch('api/notification_actions.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'mark_all_read'
+                    })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    const dropdownContent = document.querySelector('.notification-dropdown-customer .notification-dropdown-content');
+                    if (dropdownContent) {
+                        dropdownContent.innerHTML = '<div class="no-notifications"><i class="fas fa-bell-slash"></i><p>No new notifications</p></div>';
+                    }
+                    const badge = document.querySelector('.notification-badge-customer');
+                    if (badge) {
+                        badge.remove();
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+    </script>
+</body>
+
+</html>
