@@ -7,7 +7,6 @@ class BookingCalendar {
         this.serviceSelect = document.getElementById(options.serviceSelectId || 'service-type');
         this.calendarContainer = document.getElementById(options.calendarContainerId || 'calendar-container');
         this.availableDatesContainer = document.getElementById(options.availableDatesId || 'available-dates');
-        this.apiEndpoint = options.apiEndpoint || 'api/bookings.php';
 
         this.selectedDate = null;
         this.selectedTime = null;
@@ -56,8 +55,8 @@ class BookingCalendar {
         if (!serviceId) return;
 
         try {
-            const response = await fetch(`${this.apiEndpoint}?action=get_availability&service_id=${serviceId}`);
-            const data = await response.json();
+            const { getServiceAvailability } = await import('./js/firebase/data.js');
+            const data = await getServiceAvailability(serviceId);
 
             if (data.success) {
                 this.availableDates = data.available_dates || [];
@@ -66,6 +65,13 @@ class BookingCalendar {
             }
         } catch (error) {
             console.error('Error loading availability:', error);
+            // Signed-out visitors can't read requests — show an open calendar.
+            const today = new Date();
+            for (let i = 0; i < 60; i++) {
+                const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+                this.availableDates.push(this.formatDate(d));
+            }
+            this.updateCalendarUI();
         }
     }
 
@@ -284,8 +290,7 @@ document.addEventListener('DOMContentLoaded', function() {
         dateInputId: 'booking-date',
         timeInputId: 'booking-time',
         serviceSelectId: 'service-type',
-        calendarContainerId: 'calendar-container',
-        apiEndpoint: 'api/bookings.php'
+        calendarContainerId: 'calendar-container'
     });
 
     // Initialize calendar for service popup
@@ -293,8 +298,7 @@ document.addEventListener('DOMContentLoaded', function() {
         dateInputId: 'booking_date',
         timeInputId: 'booking_time',
         serviceSelectId: null,
-        calendarContainerId: 'service-calendar-container',
-        apiEndpoint: 'api/bookings.php'
+        calendarContainerId: 'service-calendar-container'
     });
 });
 
