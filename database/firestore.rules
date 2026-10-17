@@ -7,19 +7,35 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
     function isStaff() { return signedIn() && myRole() == 'staff'; }
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function isMainAdmin() {
+      return isStaff() && adminDoc().data.adminRole == 'main_admin';
+    }
 
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isStaff());
-      allow create: if signedIn() && request.auth.uid == uid
-                    && request.resource.data.role == 'customer';
+      // Customers self-register; staff may create employee accounts;
+      // only a main admin may create another staff account.
+      allow create: if signedIn() && (
+          (request.auth.uid == uid && request.resource.data.role == 'customer')
+          || (isStaff() && request.resource.data.role == 'employee')
+          || (isMainAdmin() && request.resource.data.role == 'staff'));
       allow update: if signedIn() && (
           (request.auth.uid == uid && request.resource.data.role == resource.data.role)
           || isStaff());
       allow delete: if false;
     }
 
+    // Services and products are browsed by anonymous website visitors too.
     match /services/{id} {
-      allow read: if signedIn();
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    match /products/{id} {
+      allow read: if true;
       allow write: if isStaff();
     }
 
@@ -33,16 +49,31 @@ service cloud.firestore {
           && request.resource.data.status == 'Pending'
           && request.resource.data.employeeId == null;
 
-      allow update: if isStaff() && (
-            (resource.data.status == 'Pending'
-              && request.resource.data.status in ['Approved', 'Rejected'])
-         || (resource.data.status == 'Approved'
-              && request.resource.data.status == 'Approved'))
+      allow update:
+        // Staff drive the whole lifecycle (incl. website quote statuses).
+        if (isStaff()
+            && request.resource.data.customerId == resource.data.customerId)
         || (signedIn() && myRole() == 'employee'
             && resource.data.employeeId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
             && ((resource.data.status == 'Approved' && request.resource.data.status == 'In Progress')
              || (resource.data.status == 'In Progress' && request.resource.data.status == 'Completed')))
+        // Customers: edit their own details while awaiting a quote.
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && resource.data.status in ['Pending', 'Requested', 'Contacted']
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['requestedDate', 'requestedTime', 'siteAddress', 'specialInstructions']))
+        // Customers: approve a quote (Quoted → Confirmed).
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && resource.data.status == 'Quoted'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.status == 'Confirmed')
+        // Customers: cancel a booking / decline a quote.
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && resource.data.status in ['Pending', 'Requested', 'Contacted', 'Quoted', 'Confirmed', 'Approved']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.status == 'Cancelled')
         || (signedIn() && resource.data.customerId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hasFeedback']));
       allow delete: if false;
@@ -60,11 +91,40 @@ service cloud.firestore {
     }
 
     match /notifications/{id} {
-      allow read: if signedIn() && resource.data.recipientId == request.auth.uid;
+      // Recipients read their own; staff also read the shared admin feed.
+      allow read: if signedIn() && (resource.data.recipientId == request.auth.uid
+          || isStaff());
       allow create: if signedIn();
-      allow update: if signedIn() && resource.data.recipientId == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+      allow update: if signedIn() && (isStaff()
+          || (resource.data.recipientId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])));
       allow delete: if false;
+    }
+
+    // Admin accounts — mirrors the old MySQL `admins` table.
+    // The matching users/{uid} doc (role 'staff') is what actually
+    // grants access; this collection adds main/sub-admin metadata.
+    match /admins/{uid} {
+      allow read: if isStaff();
+      // Bootstrap: a staff member can create their own admin record
+      // (first main_admin). Additional admins are created by a main admin.
+      allow create: if isStaff() && (request.auth.uid == uid || isMainAdmin());
+      // Main admin manages accounts. Each admin may edit their own
+      // profile and clear firstLogin after the forced password change,
+      // but may never change their role, active flag or creator.
+      allow update: if isMainAdmin()
+          || (isStaff() && request.auth.uid == uid
+              && request.resource.data.adminRole == resource.data.adminRole
+              && request.resource.data.isActive == resource.data.isActive
+              && request.resource.data.createdBy == resource.data.createdBy);
+      allow delete: if isMainAdmin();
+    }
+
+    // Website contact form — anyone (even signed out) may submit;
+    // only staff may read the inbox.
+    match /contact_messages/{id} {
+      allow create: if request.resource.data.keys().hasAll(['name', 'email', 'message']);
+      allow read, update, delete: if isStaff();
     }
   }
 }
