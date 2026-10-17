@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0066cc"
+      "backgroundColor": "#0A2540"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -27,7 +27,7 @@
     "android": {
       "package": "com.phambili.maafrica",
       "adaptiveIcon": {
-        "backgroundColor": "#0066cc",
+        "backgroundColor": "#0A2540",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -61,7 +61,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#0066cc",
+          "color": "#D9A03F",
           "sounds": []
         }
       ],
