@@ -26,6 +26,11 @@ A Firebase-based service request management system with mobile apps for customer
 │   ├── src/
 │   │   └── firebase.ts  # Firebase configuration
 │   └── .env.example     # Environment variables template
+├── website/             # PHP customer website (InfinityFree)
+│   ├── index.php        # Landing page
+│   ├── services.php     # Service catalogue / booking
+│   ├── css/ js/ images/ # Static assets
+│   └── db.sql           # Legacy schema reference
 ├── database/            # Firebase setup files
 │   ├── firestore.rules  # Security rules
 │   ├── seed.js          # Seed data script
