@@ -1,44 +1,3 @@
-<?php
-// Start session and include database connection
-require_once 'includes/config_session.inc.php';
-require_once 'includes/dbh.inc.php';
-require_once 'includes/service_model.inc.php';
-require_once 'includes/product_model.inc.php';
-
-// Get user data if logged in
-$user_id = $_SESSION['user_id'] ?? null;
-$user_name = $_SESSION['user_name'] ?? '';
-$user_role = $_SESSION['user_role'] ?? '';
-
-// Check user login status
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-$user_email = $_SESSION['user_email'] ?? '';
-
-// Fetch notifications for customer
-$notifications = [];
-$unreadCount = 0;
-if ($is_customer && $user_id) {
-    require_once 'includes/notifications_model.inc.php';
-    $notifications = get_notifications($pdo, $user_id, 'customer', true, 5);
-    $unreadCount = get_unread_notification_count($pdo, $user_id, 'customer');
-}
-
-// Fetch data from database
-try {
-    $services = getAvailableServices($pdo);
-    $products = getAvailableProducts($pdo);
-} catch (PDOException $e) {
-    $services = [];
-    $products = [];
-    error_log("Database error: " . $e->getMessage());
-}
-
-// Get cart count from session or localStorage (will be handled by JS)
-$cart_count = 0;
-
-?>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -55,7 +14,7 @@ $cart_count = 0;
     <link rel="stylesheet" href="./css/social-media.css">
 </head>
 
-<body class="index-page" data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+<body class="index-page">
     <!-- Updated Header Section -->
     <header class="header">
         <!-- Hamburger Menu Button -->
@@ -72,107 +31,83 @@ $cart_count = 0;
 
         <!-- Icons (Right) -->
         <div class="header-icons">
-            <?php if ($is_customer && $user_id): ?>
-                <!-- Notification Bell -->
-                <div class="notification-bell-customer">
-                    <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
-                        <i class="fas fa-bell"></i>
-                        <?php if ($unreadCount > 0): ?>
-                            <span class="notification-badge-customer"><?php echo $unreadCount; ?></span>
-                        <?php endif; ?>
-                    </button>
-                    <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
-                        <div class="notification-dropdown-header">
-                            <h4>Notifications</h4>
-                            <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
-                        </div>
-                        <div class="notification-dropdown-content">
-                            <?php if (empty($notifications)): ?>
-                                <div class="no-notifications">
-                                    <i class="fas fa-bell-slash"></i>
-                                    <p>No new notifications</p>
-                                </div>
-                            <?php else: ?>
-                                <?php foreach ($notifications as $notif): ?>
-                                    <div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
-                                        <div class="notif-content">
-                                            <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                            <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                            <small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                                        </div>
-                                        <button class="notif-close" onclick="markCustomerNotificationRead(<?php echo $notif['ID']; ?>)">
-                                            <i class="fas fa-times"></i>
-                                        </button>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
+            <!-- Notification Bell (customers only) -->
+            <div class="notification-bell-customer" data-auth="role:customer">
+                <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
+                    <i class="fas fa-bell"></i>
+                </button>
+                <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
+                    <div class="notification-dropdown-header">
+                        <h4>Notifications</h4>
+                        <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
+                    </div>
+                    <div class="notification-dropdown-content">
+                        <div class="no-notifications">
+                            <i class="fas fa-bell-slash"></i>
+                            <p>No new notifications</p>
                         </div>
                     </div>
                 </div>
-            <?php endif; ?>
-            <?php if ($is_logged_in): ?>
-                <!-- User Profile Dropdown (shown when logged in) -->
-                <div class="user-profile-dropdown" id="user-profile-dropdown">
-                    <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
-                        <img src="images/user.png" alt="User" class="icon" id="user-icon">
-                    </button>
-                    <div class="profile-dropdown-menu" id="profile-dropdown-menu">
-                        <?php if ($is_admin): ?>
-                            <!-- Admin Profile Dropdown -->
-                            <div class="profile-dropdown-header">
-                                <i class="fas fa-user-shield admin-icon"></i>
-                                <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Administrator'); ?></span>
-                                    <span class="profile-role">Admin</span>
-                                </div>
+            </div>
+            <!-- User Profile Dropdown (shown when logged in) -->
+            <div class="user-profile-dropdown" id="user-profile-dropdown" data-auth="in">
+                <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
+                    <img src="images/user.png" alt="User" class="icon" id="user-icon">
+                </button>
+                <div class="profile-dropdown-menu" id="profile-dropdown-menu">
+                    <!-- Admin/Staff Profile Dropdown -->
+                    <div data-auth="role:staff,admin,main_admin,super_admin">
+                        <div class="profile-dropdown-header">
+                            <i class="fas fa-user-shield admin-icon"></i>
+                            <div class="profile-info">
+                                <span class="profile-name" data-user-name>Administrator</span>
+                                <span class="profile-role">Admin</span>
                             </div>
-                            <div class="profile-dropdown-links">
-                                <a href="admin_dashboard.php" class="dropdown-link">
-                                    <i class="fas fa-tachometer-alt"></i>
-                                    Admin Dashboard
-                                </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
-                                    <i class="fas fa-sign-out-alt"></i>
-                                    Log Out
-                                </a>
+                        </div>
+                        <div class="profile-dropdown-links">
+                            <a href="#" class="dropdown-link" id="adminAppLink">
+                                <i class="fas fa-tachometer-alt"></i>
+                                Admin Dashboard
+                            </a>
+                            <a href="#" class="dropdown-link logout-link" data-logout>
+                                <i class="fas fa-sign-out-alt"></i>
+                                Log Out
+                            </a>
+                        </div>
+                    </div>
+                    <!-- Customer Profile Dropdown -->
+                    <div data-auth="role:customer">
+                        <div class="profile-dropdown-header">
+                            <i class="fas fa-user customer-icon"></i>
+                            <div class="profile-info">
+                                <span class="profile-name" data-user-name>Customer</span>
+                                <span class="profile-role">Customer</span>
                             </div>
-                        <?php elseif ($is_customer): ?>
-                            <!-- Customer Profile Dropdown -->
-                            <div class="profile-dropdown-header">
-                                <i class="fas fa-user customer-icon"></i>
-                                <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Customer'); ?></span>
-                                    <span class="profile-role">Customer</span>
-                                </div>
-                            </div>
-                            <div class="profile-dropdown-links">
-                                <a href="bookings.php" class="dropdown-link">
-                                    <i class="fas fa-calendar-check"></i>
-                                    Bookings
-                                </a>
-                                <a href="profile.php" class="dropdown-link">
-                                    <i class="fas fa-user"></i>
-                                    Profile
-                                </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
-                                    <i class="fas fa-sign-out-alt"></i>
-                                    Log Out
-                                </a>
-                            </div>
-                        <?php endif; ?>
+                        </div>
+                        <div class="profile-dropdown-links">
+                            <a href="bookings.php" class="dropdown-link">
+                                <i class="fas fa-calendar-check"></i>
+                                Bookings
+                            </a>
+                            <a href="profile.php" class="dropdown-link">
+                                <i class="fas fa-user"></i>
+                                Profile
+                            </a>
+                            <a href="#" class="dropdown-link logout-link" data-logout>
+                                <i class="fas fa-sign-out-alt"></i>
+                                Log Out
+                            </a>
+                        </div>
                     </div>
                 </div>
-            <?php else: ?>
-                <!-- Guest: Icon redirects to login page -->
-                <a href="login.php" class="icon-link" aria-label="Login/Register">
-                    <img src="images/user.png" alt="Login" class="icon">
-                </a>
-            <?php endif; ?>
+            </div>
+            <!-- Guest: Icon redirects to login page -->
+            <a href="login.php" class="icon-link" aria-label="Login/Register" data-auth="out">
+                <img src="images/user.png" alt="Login" class="icon">
+            </a>
             <button class="cart-btn" id="cart-btn" aria-label="Shopping Cart">
                 <img src="images/shopping-bag.png" alt="" class="icon">
-                <?php if (isset($_SESSION["user_id"])): ?>
-                    <span class="cart-badge">0</span>
-                <?php endif; ?>
+                <span class="cart-badge" data-auth="in">0</span>
             </button>
         </div>
     </header>
@@ -202,37 +137,33 @@ $cart_count = 0;
             <li class="nav-item"><a href="products.php" class="nav-link"> Products</a></li>
 
             <!-- Dynamic navigation based on role -->
-            <?php if ($is_admin): ?>
-                <!-- Admin sees Admin Dashboard link instead of Login -->
-                <li class="nav-item">
-                    <a href="admin_dashboard.php" class="nav-link admin-nav-link">
-                        Admin Dashboard
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
-                </li>
-            <?php elseif ($is_customer): ?>
-                <!-- Customer sees Profile and Logout -->
-                <li class="nav-item">
-                    <a href="bookings.php" class="nav-link">
-                        Bookings
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="profile.php" class="nav-link">
-                        Profile
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
-                </li>
-            <?php else: ?>
-                <!-- Guest sees Login -->
-                <li class="nav-item">
-                    <a href="login.php" class="nav-link"> Log In</a>
-                </li>
-            <?php endif; ?>
+            <!-- Admin/staff see Admin Dashboard link instead of Login -->
+            <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                <a href="#" class="nav-link admin-nav-link" id="adminNavLink">
+                    Admin Dashboard
+                </a>
+            </li>
+            <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                <a href="#" class="nav-link" data-logout> Log Out</a>
+            </li>
+            <!-- Customer sees Profile and Logout -->
+            <li class="nav-item" data-auth="role:customer">
+                <a href="bookings.php" class="nav-link">
+                    Bookings
+                </a>
+            </li>
+            <li class="nav-item" data-auth="role:customer">
+                <a href="profile.php" class="nav-link">
+                    Profile
+                </a>
+            </li>
+            <li class="nav-item" data-auth="role:customer">
+                <a href="#" class="nav-link" data-logout> Log Out</a>
+            </li>
+            <!-- Guest sees Login -->
+            <li class="nav-item" data-auth="out">
+                <a href="login.php" class="nav-link"> Log In</a>
+            </li>
 
             <li class="nav-item">
                 <a href="booking.php" class="nav-link book-now-btn ">
@@ -341,7 +272,7 @@ $cart_count = 0;
     </section>
 
     <!-- Fixed Home Services and Products Summary Section -->
-    <!-- DEBUG: Services loaded: <?php echo count($services); ?>, Products loaded: <?php echo count($products); ?> -->
+    <!-- Services and products are rendered client-side from Firestore -->
     <section class="home-services-summary" aria-labelledby="home-services-title">
         <div class="home-services-header animate-on-scroll" id="home-services-title">
             <div class="index-quote-header">
@@ -359,49 +290,9 @@ $cart_count = 0;
 
             <div class="home-carousel-container">
                 <div class="home-services-bar" id="home-services-bar">
-                    <?php if (!empty($services) || !empty($products)): ?>
-                        <?php if (!empty($services)): ?>
-                            <?php foreach ($services as $service): ?>
-                                <a href="services.php?id=<?php echo htmlspecialchars($service['ID']); ?>" class="home-service-card">
-                                    <div class="home-card-image">
-                                        <?php if (!empty($service['Image_URL'])): ?>
-                                            <img src="<?php echo htmlspecialchars($service['Image_URL']); ?>" alt="<?php echo htmlspecialchars($service['Name']); ?>">
-                                        <?php else: ?>
-                                            <i class="fas fa-broom"></i>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="home-service-info">
-                                        <h3><?php echo htmlspecialchars($service['Name']); ?></h3>
-                                        <span class="home-service-cta">Learn More <i class="fas fa-arrow-right"></i></span>
-                                    </div>
-                                </a>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                        <?php if (!empty($products)): ?>
-                            <?php foreach ($products as $product): ?>
-                                <div class="home-service-card product-card" data-product-id="<?php echo htmlspecialchars($product['ID']); ?>">
-                                    <div class="home-card-image">
-                                        <?php if (!empty($product['Image_URL'])): ?>
-                                            <img src="<?php echo htmlspecialchars($product['Image_URL']); ?>" alt="<?php echo htmlspecialchars($product['Name']); ?>">
-                                        <?php else: ?>
-                                            <i class="fas fa-spray-can"></i>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="home-service-info">
-                                        <h3><?php echo htmlspecialchars($product['Name']); ?></h3>
-                                        <p class="product-price">R<?php echo number_format($product['Price'], 2); ?></p>
-                                        <button class="home-service-cta add-to-cart-btn" data-product-id="<?php echo htmlspecialchars($product['ID']); ?>" data-product-name="<?php echo htmlspecialchars($product['Name']); ?>" data-product-price="<?php echo $product['Price']; ?>">
-                                            <i class="fas fa-shopping-cart"></i> Add to Cart
-                                        </button>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    <?php else: ?>
-                        <div class="loading-state">
-                            <p>No services or products available at the moment.</p>
-                        </div>
-                    <?php endif; ?>
+                    <div class="loading-state">
+                        <p>Loading services and products...</p>
+                    </div>
                 </div>
             </div>
 
@@ -757,89 +648,90 @@ $cart_count = 0;
 
     <script src="./js/config.js"></script>
     <script src="./js/script.js"></script>
-    <script>
-        // Customer notification dropdown functionality
-        function toggleCustomerNotificationDropdown() {
-            const dropdown = document.getElementById('notificationDropdownCustomer');
-            if (dropdown) {
-                dropdown.classList.toggle('active');
-            }
+    <script type="module" src="./js/firebase/ui.js"></script>
+    <script type="module" src="./js/firebase/notifications.js"></script>
+    <script type="module">
+        import { watchServices, getProducts } from './js/firebase/data.js';
+
+        const esc = (s) => {
+            const d = document.createElement('div');
+            d.textContent = s ?? '';
+            return d.innerHTML;
+        };
+
+        const bar = document.getElementById('home-services-bar');
+        let servicesHtml = '';
+        let productsHtml = '';
+
+        function renderBar() {
+            if (!bar) return;
+            const html = servicesHtml + productsHtml;
+            bar.innerHTML = html || '<div class="loading-state"><p>No services or products available at the moment.</p></div>';
         }
 
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const notificationBell = document.querySelector('.notification-bell-customer');
-            if (notificationBell && !notificationBell.contains(event.target)) {
-                const dropdown = document.getElementById('notificationDropdownCustomer');
-                if (dropdown) {
-                    dropdown.classList.remove('active');
-                }
-            }
+        watchServices((services) => {
+            servicesHtml = services
+                .filter((s) => s.Is_Available)
+                .map((s) => `
+                    <a href="services.php?id=${encodeURIComponent(s.ID)}" class="home-service-card">
+                        <div class="home-card-image">
+                            ${s.Image_URL
+                                ? `<img src="${esc(s.Image_URL)}" alt="${esc(s.Name)}">`
+                                : '<i class="fas fa-broom"></i>'}
+                        </div>
+                        <div class="home-service-info">
+                            <h3>${esc(s.Name)}</h3>
+                            <span class="home-service-cta">Learn More <i class="fas fa-arrow-right"></i></span>
+                        </div>
+                    </a>`)
+                .join('');
+            renderBar();
         });
 
-        // Mark individual notification as read
-        async function markCustomerNotificationRead(notificationId) {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_read',
-                        notification_id: notificationId
-                    })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
-                    if (notifItem) {
-                        notifItem.style.opacity = '0';
-                        setTimeout(() => notifItem.remove(), 300);
-                    }
-                    // Update badge count
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        const currentCount = parseInt(badge.textContent);
-                        if (currentCount > 1) {
-                            badge.textContent = currentCount - 1;
-                        } else {
-                            badge.remove();
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
+        getProducts().then((products) => {
+            productsHtml = products
+                .filter((p) => p.Is_Available)
+                .map((p) => `
+                    <div class="home-service-card product-card" data-product-id="${esc(p.ID)}">
+                        <div class="home-card-image">
+                            ${p.Image_URL
+                                ? `<img src="${esc(p.Image_URL)}" alt="${esc(p.Name)}">`
+                                : '<i class="fas fa-spray-can"></i>'}
+                        </div>
+                        <div class="home-service-info">
+                            <h3>${esc(p.Name)}</h3>
+                            <p class="product-price">R${Number(p.Price).toFixed(2)}</p>
+                            <button class="home-service-cta add-to-cart-btn" data-product-id="${esc(p.ID)}" data-product-name="${esc(p.Name)}" data-product-price="${Number(p.Price)}">
+                                <i class="fas fa-shopping-cart"></i> Add to Cart
+                            </button>
+                        </div>
+                    </div>`)
+                .join('');
+            renderBar();
+        }).catch(() => renderBar());
 
-        // Mark all notifications as read
-        async function markAllCustomerNotificationsRead() {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_all_read'
-                    })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const dropdownContent = document.querySelector('.notification-dropdown-customer .notification-dropdown-content');
-                    if (dropdownContent) {
-                        dropdownContent.innerHTML = '<div class="no-notifications"><i class="fas fa-bell-slash"></i><p>No new notifications</p></div>';
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        badge.remove();
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
+        // Point admin links at the Firebase admin dashboard
+        const adminUrl = (window.CONFIG && window.CONFIG.ADMIN_APP_URL) || './admin_dashboard.php';
+        document.getElementById('adminAppLink')?.setAttribute('href', adminUrl);
+        document.getElementById('adminNavLink')?.setAttribute('href', adminUrl);
+
+        // Add to cart (delegated — buttons are JS-rendered)
+        const CART_KEY = (window.CONFIG?.STORAGE_KEYS?.CART) || 'pma_cart';
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.add-to-cart-btn');
+            if (!btn) return;
+            const cart = JSON.parse(localStorage.getItem(CART_KEY) || '[]');
+            cart.push({
+                id: btn.dataset.productId,
+                name: btn.dataset.productName,
+                price: parseFloat(btn.dataset.productPrice) || 0,
+                qty: 1,
+            });
+            localStorage.setItem(CART_KEY, JSON.stringify(cart));
+            document.querySelectorAll('.cart-badge').forEach((b) => {
+                b.textContent = cart.reduce((sum, i) => sum + (i.qty || 1), 0);
+            });
+        });
     </script>
 </body>
 

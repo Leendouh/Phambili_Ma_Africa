@@ -1,260 +1,22 @@
-<?php
-// Admin Dashboard - Consolidated single-page admin panel
-require_once 'includes/dbh.inc.php';
-require_once 'includes/booking_contr.inc.php';
-require_once 'includes/service_contr.inc.php';
-require_once 'includes/product_contr.inc.php';
-require_once 'includes/config_session.inc.php';
-require_once 'includes/admin_dashboard.inc.php';
-
-// Check if admin is logged in
-if (!isset($_SESSION['admin_id'])) {
-    header('Location: login.php');
-    exit();
-}
-
-// Include notification functions
-require_once 'includes/notifications_model.inc.php';
-
-// Fetch notifications for admin
-$adminId = $_SESSION['admin_id'];
-$adminNotifications = get_notifications($pdo, $adminId, 'admin', true, 5);
-$adminUnreadCount = get_unread_notification_count($pdo, $adminId, 'admin');
-
-// Helper function to get relative date like WhatsApp
-function getRelativeDate($dateString) {
-    $date = new DateTime($dateString);
-    $today = new DateTime('today');
-    $yesterday = new DateTime('yesterday');
-    $diff = $today->diff($date);
-
-    // Reset times to compare dates only
-    $date->setTime(0, 0, 0);
-    $today->setTime(0, 0, 0);
-    $yesterday->setTime(0, 0, 0);
-
-    if ($date == $today) {
-        return 'Today';
-    } elseif ($date == $yesterday) {
-        return 'Yesterday';
-    } elseif ($diff->days == 2) {
-        return 'Day before yesterday';
-    } elseif ($diff->days <= 7) {
-        return $date->format('l'); // Day name (Monday, Tuesday, etc.)
-    } else {
-        return $date->format('M d, Y'); // Full date for older bookings
-    }
-}
-
-// ========== BOOKINGS DATA ==========
-
-// Auto-expire quotes and past bookings
-expireQuotes($pdo);
-expirePastBookings($pdo);
-
-// Check for upcoming expirations and send notifications
-checkUpcomingExpirations($pdo);
-
-$filters = [
-    'status' => $_GET['status'] ?? null,
-    'search' => $_GET['search'] ?? null,
-    'service_id' => $_GET['service_id'] ?? null,
-    'date_from' => $_GET['date_from'] ?? null,
-    'date_to' => $_GET['date_to'] ?? null,
-    'page' => $_GET['page'] ?? 1,
-    'limit' => 10
-];
-
-$bookingsResult = getAllBookingsController($pdo, $filters);
-$bookings = $bookingsResult['success'] ? $bookingsResult['bookings'] : [];
-$totalPages = $bookingsResult['totalPages'] ?? 1;
-$currentPage = $bookingsResult['currentPage'] ?? 1;
-$totalBookings = $bookingsResult['totalBookings'] ?? 0;
-
-$statsResult = getBookingStatsController($pdo);
-$bookingStats = $statsResult['success'] ? $statsResult['stats'] : [];
-
-$statusColors = [
-    'requested' => 'requested',
-    'contacted' => 'contacted',
-    'in_progress' => 'in_progress',
-    'quoted' => 'quoted',
-    'confirmed' => 'confirmed',
-    'completed' => 'completed',
-    'cancelled' => 'cancelled',
-    'expired' => 'expired'
-];
-
-$statusLabels = [
-    'requested' => 'Requested',
-    'contacted' => 'Contacted',
-    'in_progress' => 'In Progress',
-    'quoted' => 'Quoted',
-    'confirmed' => 'Confirmed',
-    'completed' => 'Completed',
-    'cancelled' => 'Cancelled',
-    'expired' => 'Expired'
-];
-
-// ========== SERVICES DATA ==========
-$servicesResult = getServicesController($pdo);
-$services = $servicesResult['success'] ? $servicesResult['services'] : [];
-
-// ========== PRODUCTS DATA ==========
-$productsResult = getProductsController($pdo);
-$products = $productsResult['success'] ? $productsResult['products'] : [];
-
-$productStatsResult = getProductStatsController($pdo);
-$productStats = $productStatsResult['success'] ? $productStatsResult['stats'] : [];
-
-// ========== DASHBOARD STATS ==========
-$totalServices = count($services);
-$availableServices = count(array_filter($services, fn($s) => $s['Is_Available'] == 1));
-$totalProducts = count($products);
-$availableProducts = count(array_filter($products, fn($p) => $p['Is_Available'] == 1));
-
-// ========== CURRENT ADMIN DATA ==========
-$currentAdminId = $_SESSION['admin_id'];
-$stmt = $pdo->prepare("SELECT * FROM admins WHERE ID = :id");
-$stmt->execute([':id' => $currentAdminId]);
-$currentAdmin = $stmt->fetch(PDO::FETCH_ASSOC);
-
-// ========== FIRST LOGIN PASSWORD RESET ==========
-$needsPasswordReset = false;
-$resetError = '';
-$resetSuccess = false;
-
-if ($currentAdmin && $currentAdmin['first_login'] == 1) {
-    $needsPasswordReset = true;
-}
-
-// Handle first login password reset
-if ($needsPasswordReset && $_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST['first_login_reset'])) {
-    $newPassword = $_POST['new_password'] ?? '';
-    $confirmPassword = $_POST['confirm_password'] ?? '';
-    
-    // Validate password
-    if (strlen($newPassword) < 8) {
-        $resetError = "Password must be at least 8 characters long.";
-    } elseif (!preg_match('/[A-Z]/', $newPassword)) {
-        $resetError = "Password must contain at least one uppercase letter.";
-    } elseif (!preg_match('/[a-z]/', $newPassword)) {
-        $resetError = "Password must contain at least one lowercase letter.";
-    } elseif (!preg_match('/[0-9]/', $newPassword)) {
-        $resetError = "Password must contain at least one number.";
-    } elseif (!preg_match('/[!@#$%^&*]/', $newPassword)) {
-        $resetError = "Password must contain at least one special character (!@#$%^&*).";
-    } elseif ($newPassword !== $confirmPassword) {
-        $resetError = "Passwords do not match.";
-    } else {
-        try {
-            // Update password and set first_login to 0
-            require_once 'includes/login_model.inc.php';
-            update_admin_password($pdo, $currentAdminId, $newPassword);
-            
-            // Refresh admin data
-            $stmt = $pdo->prepare("SELECT * FROM admins WHERE ID = :id");
-            $stmt->execute([':id' => $currentAdminId]);
-            $currentAdmin = $stmt->fetch(PDO::FETCH_ASSOC);
-            $needsPasswordReset = false;
-            $resetSuccess = true;
-        } catch (Exception $e) {
-            $resetError = "Error updating password. Please try again.";
-        }
-    }
-}
-
-// ========== PROFILE UPDATE HANDLING ==========
-$profileMessage = '';
-$profileError = '';
-$profileEditMode = isset($_GET['edit_profile']) && $_GET['edit_profile'] === '1';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
-    $fullName = trim($_POST['full_name'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
-    
-    // Validation
-    if (empty($fullName)) {
-        $profileError = "Full name is required.";
-    } elseif (strlen($fullName) < 2) {
-        $profileError = "Full name must be at least 2 characters.";
-    } elseif (!preg_match('/^[a-zA-Z\s\-\']+$/', $fullName)) {
-        $profileError = "Full name can only contain letters, spaces, hyphens, and apostrophes.";
-    } elseif (empty($phone)) {
-        $profileError = "Phone number is required.";
-    } else {
-        // Strict phone validation - exactly 10 digits, only numbers, South African format
-        $clean_phone = preg_replace('/\D/', '', $phone);
-        
-        if (!ctype_digit($clean_phone)) {
-            $profileError = "Phone number must contain only digits (0-9), no letters or special characters.";
-        } elseif (strlen($clean_phone) !== 10) {
-            $profileError = "Phone number must be exactly 10 digits.";
-        } elseif (!preg_match('/^0[0-9]{9}$/', $clean_phone)) {
-            $profileError = "Phone number must start with 0 followed by 9 digits (e.g., 0821234567).";
-        } else {
-            try {
-                $sql = "UPDATE admins SET Full_Name = :full_name, Phone = :phone, updatedAt = NOW() WHERE ID = :id";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([
-                    ':full_name' => $fullName,
-                    ':phone' => $clean_phone,
-                    ':id' => $currentAdminId
-                ]);
-                
-                // Refresh admin data
-                $stmt = $pdo->prepare("SELECT * FROM admins WHERE ID = :id");
-                $stmt->execute([':id' => $currentAdminId]);
-                $currentAdmin = $stmt->fetch(PDO::FETCH_ASSOC);
-                
-                // Update session
-                $_SESSION["admin_full_name"] = htmlspecialchars($fullName);
-                
-                $profileMessage = "Profile updated successfully!";
-                $profileEditMode = false;
-            } catch (PDOException $e) {
-                $profileError = "Error updating profile. Please try again.";
-            }
-        }
-    }
-}
-
-// ========== CUSTOMERS DATA ==========
-$stmt = $pdo->query("SELECT ID, Full_Name, Email, Phone, Address, createdAt FROM customers ORDER BY createdAt DESC");
-$customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$totalCustomers = count($customers);
-
-// ========== ADMINS DATA (for main_admin only) ==========
-$admins = [];
-$totalAdmins = 0;
-if ($currentAdmin && $currentAdmin['Role'] === 'main_admin') {
-    $stmt = $pdo->query("SELECT ID, Full_Name, Email, Phone, Role, createdAt FROM admins ORDER BY createdAt DESC");
-    $admins = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $totalAdmins = count($admins);
-}
-
-// Determine active section from URL param
-$activeSection = $_GET['section'] ?? 'dashboard';
-$validSections = ['dashboard', 'bookings', 'services', 'products', 'customers', 'admins', 'admin-profile', 'profile'];
-if (!in_array($activeSection, $validSections)) {
-    $activeSection = 'dashboard';
-}
-?>
 <!DOCTYPE html>
+<!-- Admin Dashboard - Firebase edition.
+     Same UI as the old PHP/MySQL page; all data now comes from Firestore
+     (requests / services / products / users / admins / notifications) and
+     Firebase Auth replaces the PHP admin session. -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Phambili Ma-Africa</title>
     <link rel="icon" type="image/png" sizes="32x32" href="images/PM-Logo.jpg">
-    
+
     <!-- Open Graph Meta Tags for Social Media Preview -->
     <meta property="og:title" content="Admin Dashboard - Phambili Ma-Africa">
     <meta property="og:description" content="Admin dashboard for managing Phambili Ma-Africa cleaning services.">
     <meta property="og:image" content="images/PM-Logo.jpg">
     <meta property="og:url" content="https://phambili-ma-africa.com/admin_dashboard.php">
     <meta property="og:type" content="website">
-    
+
     <!-- Twitter Card Meta Tags -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Admin Dashboard - Phambili Ma-Africa">
@@ -263,33 +25,48 @@ if (!in_array($activeSection, $validSections)) {
 
     <link rel="stylesheet" href="css/admin_dashboard.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <script src="./js/config.js"></script>
+    <style>
+        #authGate {
+            position: fixed; inset: 0; z-index: 100000;
+            background: var(--secondary-color, #f4f6fb);
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column; gap: 1rem;
+        }
+        #authGate .gate-spinner {
+            width: 46px; height: 46px; border-radius: 50%;
+            border: 4px solid rgba(102,126,234,.25);
+            border-top-color: #667eea;
+            animation: gateSpin .8s linear infinite;
+        }
+        @keyframes gateSpin { to { transform: rotate(360deg); } }
+    </style>
 </head>
 <body>
-    <?php if ($needsPasswordReset): ?>
-    <!-- First Login Password Reset Modal -->
-    <div class="first-login-overlay">
+    <!-- Shown until Firebase Auth confirms this is a staff user -->
+    <div id="authGate">
+        <div class="gate-spinner"></div>
+        <p style="color:var(--text-light,#888);font-weight:600;">Loading admin dashboard…</p>
+    </div>
+
+    <!-- First Login Password Reset Modal (shown when admins.firstLogin is true) -->
+    <div class="first-login-overlay" id="firstLoginOverlay" style="display:none;">
         <div class="first-login-modal">
             <div class="first-login-header">
                 <i class="bi bi-shield-lock"></i>
                 <h2>Security First: Set New Password</h2>
-                <p>Welcome, <?php echo htmlspecialchars($currentAdmin['Full_Name'] ?: $currentAdmin['Email']); ?>! For security reasons, please set a new password for your admin account.</p>
+                <p>Welcome, <span id="firstLoginName">Admin</span>! For security reasons, please set a new password for your admin account.</p>
             </div>
             <div class="first-login-body">
-                <?php if ($resetError): ?>
-                <div class="first-login-error">
-                    <i class="bi bi-exclamation-circle"></i> <?php echo $resetError; ?>
+                <div class="first-login-error" id="firstLoginError" style="display:none;">
+                    <i class="bi bi-exclamation-circle"></i> <span id="firstLoginErrorText"></span>
                 </div>
-                <?php endif; ?>
-                
-                <?php if ($resetSuccess): ?>
-                <div class="first-login-success">
+                <div class="first-login-success" id="firstLoginSuccess" style="display:none;">
                     <i class="bi bi-check-circle-fill"></i>
                     <h3>Password Updated!</h3>
-                    <p>Your password has been set successfully. Redirecting to dashboard...</p>
-                    <script>setTimeout(() => location.reload(), 1500);</script>
+                    <p>Your password has been set successfully. Loading dashboard...</p>
                 </div>
-                <?php else: ?>
-                <form method="post" id="firstLoginForm">
+                <form id="firstLoginForm">
                     <div class="form-group">
                         <label>New Password <span class="text-danger">*</span></label>
                         <input type="password" name="new_password" id="newPassword" class="form-input" required minlength="8" placeholder="Create a strong password">
@@ -303,7 +80,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <li id="req-upper">One uppercase letter</li>
                                 <li id="req-lower">One lowercase letter</li>
                                 <li id="req-number">One number</li>
-                                <li id="req-special">One special character (!@#$%^&*)</li>
+                                <li id="req-special">One special character (!@#$%^&amp;*)</li>
                             </ul>
                         </div>
                     </div>
@@ -312,75 +89,12 @@ if (!in_array($activeSection, $validSections)) {
                         <input type="password" name="confirm_password" id="confirmPassword" class="form-input" required minlength="8" placeholder="Confirm your password">
                     </div>
                     <button type="submit" name="first_login_reset" class="btn btn-primary" style="width:100%;">
-                        <i class="bi bi-lock"></i> Update Password & Continue
+                        <i class="bi bi-lock"></i> Update Password &amp; Continue
                     </button>
                 </form>
-                <?php endif; ?>
             </div>
         </div>
     </div>
-    <script>
-    (function() {
-        const newPass = document.getElementById('newPassword');
-        const confirmPass = document.getElementById('confirmPassword');
-        const strengthFill = document.getElementById('strengthFill');
-        const form = document.getElementById('firstLoginForm');
-        
-        const requirements = {
-            len: document.getElementById('req-len'),
-            upper: document.getElementById('req-upper'),
-            lower: document.getElementById('req-lower'),
-            number: document.getElementById('req-number'),
-            special: document.getElementById('req-special')
-        };
-        
-        function checkStrength(password) {
-            let score = 0;
-            const hasLen = password.length >= 8;
-            const hasUpper = /[A-Z]/.test(password);
-            const hasLower = /[a-z]/.test(password);
-            const hasNumber = /[0-9]/.test(password);
-            const hasSpecial = /[!@#$%^&*]/.test(password);
-            
-            requirements.len.classList.toggle('met', hasLen);
-            requirements.upper.classList.toggle('met', hasUpper);
-            requirements.lower.classList.toggle('met', hasLower);
-            requirements.number.classList.toggle('met', hasNumber);
-            requirements.special.classList.toggle('met', hasSpecial);
-            
-            if (hasLen) score++;
-            if (hasUpper) score++;
-            if (hasLower) score++;
-            if (hasNumber) score++;
-            if (hasSpecial) score++;
-            
-            strengthFill.className = 'password-strength-fill';
-            if (score <= 2) strengthFill.classList.add('weak');
-            else if (score <= 4) strengthFill.classList.add('medium');
-            else strengthFill.classList.add('strong');
-            
-            return score === 5;
-        }
-        
-        newPass.addEventListener('input', function() {
-            checkStrength(this.value);
-        });
-        
-        form.addEventListener('submit', function(e) {
-            if (newPass.value !== confirmPass.value) {
-                e.preventDefault();
-                ModalDialog.alert('Passwords do not match!', { title: 'Error', type: 'danger' });
-                return;
-            }
-            if (!checkStrength(newPass.value)) {
-                e.preventDefault();
-                ModalDialog.alert('Please meet all password requirements.', { title: 'Error', type: 'danger' });
-                return;
-            }
-        });
-    })();
-    </script>
-    <?php endif; ?>
 
     <div class="dashboard-container">
         <!-- Sidebar -->
@@ -404,45 +118,49 @@ if (!in_array($activeSection, $validSections)) {
             <nav class="sidebar-nav">
                 <ul>
                     <li>
-                        <a href="#" class="nav-link <?php echo $activeSection === 'dashboard' ? 'active' : ''; ?>" data-section="dashboard">
+                        <a href="#" class="nav-link" data-section="dashboard">
                             <i class="bi bi-speedometer2"></i>
                             <span>Dashboard</span>
                         </a>
                     </li>
                     <li>
-                        <a href="#" class="nav-link <?php echo $activeSection === 'bookings' ? 'active' : ''; ?>" data-section="bookings">
+                        <a href="#" class="nav-link" data-section="bookings">
                             <i class="bi bi-calendar-check"></i>
                             <span>Bookings</span>
                         </a>
                     </li>
                     <li>
-                        <a href="#" class="nav-link <?php echo $activeSection === 'services' ? 'active' : ''; ?>" data-section="services">
+                        <a href="#" class="nav-link" data-section="services">
                             <i class="bi bi-briefcase"></i>
                             <span>Services</span>
                         </a>
                     </li>
                     <li>
-                        <a href="#" class="nav-link <?php echo $activeSection === 'products' ? 'active' : ''; ?>" data-section="products">
+                        <a href="#" class="nav-link" data-section="products">
                             <i class="bi bi-box-seam"></i>
                             <span>Products</span>
                         </a>
                     </li>
                     <li>
-                        <a href="#" class="nav-link <?php echo $activeSection === 'customers' ? 'active' : ''; ?>" data-section="customers">
+                        <a href="#" class="nav-link" data-section="customers">
                             <i class="bi bi-people"></i>
                             <span>Customers</span>
                         </a>
                     </li>
-                    <?php if ($currentAdmin && $currentAdmin['Role'] === 'main_admin'): ?>
-                    <li>
-                        <a href="#" class="nav-link <?php echo $activeSection === 'admins' ? 'active' : ''; ?>" data-section="admins">
+                    <li id="navEmployees">
+                        <a href="#" class="nav-link" data-section="employees">
+                            <i class="bi bi-person-badge"></i>
+                            <span>Employees</span>
+                        </a>
+                    </li>
+                    <li id="navAdmins" style="display:none;">
+                        <a href="#" class="nav-link" data-section="admins">
                             <i class="bi bi-shield-lock"></i>
                             <span>Admin Management</span>
                         </a>
                     </li>
-                    <?php endif; ?>
                     <li>
-                        <a href="#" class="nav-link <?php echo $activeSection === 'admin-profile' ? 'active' : ''; ?>" data-section="admin-profile">
+                        <a href="#" class="nav-link" data-section="admin-profile">
                             <i class="bi bi-person-circle"></i>
                             <span>My Profile</span>
                         </a>
@@ -451,13 +169,13 @@ if (!in_array($activeSection, $validSections)) {
             </nav>
 
             <div class="sidebar-footer">
-                <a href="includes/logout.inc.php" class="logout-btn">
+                <a href="#" class="logout-btn" id="logoutBtn">
                     <i class="bi bi-box-arrow-left"></i>
                     <span>Logout</span>
                 </a>
             </div>
         </aside>
-        
+
         <!-- Sidebar Overlay for Mobile -->
         <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
@@ -476,35 +194,18 @@ if (!in_array($activeSection, $validSections)) {
                     <div class="notification-bell">
                         <button class="bell-btn" onclick="toggleNotificationDropdown()">
                             <i class="bi bi-bell"></i>
-                            <?php if ($adminUnreadCount > 0): ?>
-                                <span class="notification-badge"><?php echo $adminUnreadCount; ?></span>
-                            <?php endif; ?>
+                            <span class="notification-badge" id="notificationBadge" style="display:none;">0</span>
                         </button>
                         <div class="notification-dropdown" id="notificationDropdown">
                             <div class="notification-dropdown-header">
                                 <h4>Notifications</h4>
                                 <button class="mark-all-read-btn" onclick="markAllAdminNotificationsRead()">Mark all read</button>
                             </div>
-                            <div class="notification-dropdown-content">
-                                <?php if (empty($adminNotifications)): ?>
-                                    <div class="no-notifications">
-                                        <i class="bi bi-bell-slash"></i>
-                                        <p>No new notifications</p>
-                                    </div>
-                                <?php else: ?>
-                                    <?php foreach ($adminNotifications as $notif): ?>
-                                        <div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
-                                            <div class="notif-content">
-                                                <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                                <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                                <small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                                            </div>
-                                            <button class="notif-close" onclick="markAdminNotificationRead(<?php echo $notif['ID']; ?>)">
-                                                <i class="bi bi-x"></i>
-                                            </button>
-                                        </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
+                            <div class="notification-dropdown-content" id="notificationDropdownContent">
+                                <div class="no-notifications">
+                                    <i class="bi bi-bell-slash"></i>
+                                    <p>No new notifications</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -512,7 +213,7 @@ if (!in_array($activeSection, $validSections)) {
                         <div class="user-avatar">
                             <i class="bi bi-person"></i>
                         </div>
-                        <span><?php echo htmlspecialchars($currentAdmin['Full_Name'] ?? 'Admin'); ?></span>
+                        <span id="headerUserName">Admin</span>
                     </div>
                 </div>
             </header>
@@ -521,7 +222,7 @@ if (!in_array($activeSection, $validSections)) {
             <div class="content-sections">
 
                 <!-- ==================== DASHBOARD SECTION ==================== -->
-                <div class="content-section <?php echo $activeSection === 'dashboard' ? 'active' : ''; ?>" id="section-dashboard">
+                <div class="content-section" id="section-dashboard">
                     <!-- Stats Grid -->
                     <div class="stats-grid">
                         <div class="stat-card">
@@ -529,7 +230,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-calendar-check"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $totalBookings; ?></h3>
+                                <h3 id="statTotalBookings">0</h3>
                                 <p>Total Bookings</p>
                             </div>
                         </div>
@@ -538,7 +239,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-clock-history"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $bookingStats['pending_contact'] ?? 0; ?></h3>
+                                <h3 id="statPendingContact">0</h3>
                                 <p>Pending Contact</p>
                             </div>
                         </div>
@@ -547,7 +248,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-briefcase"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $totalServices; ?></h3>
+                                <h3 id="statTotalServices">0</h3>
                                 <p>Services</p>
                             </div>
                         </div>
@@ -556,7 +257,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-box-seam"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $totalProducts; ?></h3>
+                                <h3 id="statTotalProducts">0</h3>
                                 <p>Products</p>
                             </div>
                         </div>
@@ -569,30 +270,11 @@ if (!in_array($activeSection, $validSections)) {
                                 <h3><i class="bi bi-calendar-check"></i> Recent Bookings</h3>
                                 <a href="#" class="view-all" data-section="bookings">View All</a>
                             </div>
-                            <div class="card-body">
-                                <?php if (empty($bookings)): ?>
-                                    <div class="empty-state">
-                                        <i class="bi bi-calendar-x"></i>
-                                        <p>No bookings yet</p>
-                                    </div>
-                                <?php else: ?>
-                                    <?php foreach (array_slice($bookings, 0, 5) as $booking): ?>
-                                    <div class="booking-item">
-                                        <div class="booking-avatar">
-                                            <?php echo strtoupper(substr($booking['Customer_Name'], 0, 1)); ?>
-                                        </div>
-                                        <div class="booking-info">
-                                            <h4><?php echo htmlspecialchars($booking['Customer_Name']); ?></h4>
-                                            <p><?php echo htmlspecialchars($booking['Service_Name']); ?> - <?php echo getRelativeDate($booking['created_at']); ?></p>
-                                        </div>
-                                        <div class="booking-meta">
-                                            <span class="booking-status <?php echo $statusColors[$booking['Status']] ?? ''; ?>">
-                                                <?php echo $statusLabels[$booking['Status']] ?? $booking['Status']; ?>
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
+                            <div class="card-body" id="recentBookingsBody">
+                                <div class="empty-state">
+                                    <i class="bi bi-calendar-x"></i>
+                                    <p>No bookings yet</p>
+                                </div>
                             </div>
                         </div>
 
@@ -622,17 +304,10 @@ if (!in_array($activeSection, $validSections)) {
                                             <i class="bi bi-people"></i>
                                             <span>Customers</span>
                                         </a>
-                                        <?php if ($currentAdmin && $currentAdmin['Role'] === 'main_admin'): ?>
-                                        <a href="#" class="action-btn" data-section="admins">
+                                        <a href="#" class="action-btn" data-section="admins" id="quickActionAdmins" style="display:none;">
                                             <i class="bi bi-shield-lock"></i>
                                             <span>Admin Management</span>
                                         </a>
-                                        <?php else: ?>
-                                        <a href="#" class="action-btn" data-section="admin-profile">
-                                            <i class="bi bi-person-circle"></i>
-                                            <span>My Profile</span>
-                                        </a>
-                                        <?php endif; ?>
                                         <a href="#" class="action-btn" data-section="admin-profile">
                                             <i class="bi bi-person-circle"></i>
                                             <span>My Profile</span>
@@ -645,7 +320,7 @@ if (!in_array($activeSection, $validSections)) {
                 </div>
 
                 <!-- ==================== BOOKINGS SECTION ==================== -->
-                <div class="content-section <?php echo $activeSection === 'bookings' ? 'active' : ''; ?>" id="section-bookings">
+                <div class="content-section" id="section-bookings">
                     <div class="section-header">
                         <h2>Manage Bookings</h2>
                         <button class="btn btn-primary" onclick="exportBookings()">
@@ -660,7 +335,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-calendar-plus"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $bookingStats['today_requests'] ?? 0; ?></h3>
+                                <h3 id="statTodayRequests">0</h3>
                                 <p>Today's Requests</p>
                             </div>
                         </div>
@@ -669,7 +344,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-telephone"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $bookingStats['pending_contact'] ?? 0; ?></h3>
+                                <h3 id="statNeedContact">0</h3>
                                 <p>Need Contact</p>
                             </div>
                         </div>
@@ -678,7 +353,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-cash"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $bookingStats['pending_quotation'] ?? 0; ?></h3>
+                                <h3 id="statNeedQuote">0</h3>
                                 <p>Need Quote</p>
                             </div>
                         </div>
@@ -687,7 +362,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-check-circle"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $bookingStats['upcoming_bookings'] ?? 0; ?></h3>
+                                <h3 id="statUpcoming">0</h3>
                                 <p>Upcoming</p>
                             </div>
                         </div>
@@ -695,144 +370,42 @@ if (!in_array($activeSection, $validSections)) {
 
                     <!-- Filters -->
                     <div class="filters">
-                        <form class="d-flex" method="GET" id="bookingFilterForm" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-                            <input type="hidden" name="section" value="bookings">
+                        <form class="d-flex" id="bookingFilterForm" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;" onsubmit="return false;">
                             <select class="search-input" name="status" id="statusFilter">
                                 <option value="">All Status</option>
-                                <option value="requested" <?php echo ($filters['status'] ?? '') === 'requested' ? 'selected' : ''; ?>>Requested</option>
-                                <option value="contacted" <?php echo ($filters['status'] ?? '') === 'contacted' ? 'selected' : ''; ?>>Contacted</option>
-                                <option value="in_progress" <?php echo ($filters['status'] ?? '') === 'in_progress' ? 'selected' : ''; ?>>In Progress</option>
-                                <option value="quoted" <?php echo ($filters['status'] ?? '') === 'quoted' ? 'selected' : ''; ?>>Quoted</option>
-                                <option value="confirmed" <?php echo ($filters['status'] ?? '') === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
-                                <option value="completed" <?php echo ($filters['status'] ?? '') === 'completed' ? 'selected' : ''; ?>>Completed</option>
-                                <option value="cancelled" <?php echo ($filters['status'] ?? '') === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                                <option value="expired" <?php echo ($filters['status'] ?? '') === 'expired' ? 'selected' : ''; ?>>Expired</option>
+                                <option value="requested">Requested</option>
+                                <option value="contacted">Contacted</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="quoted">Quoted</option>
+                                <option value="confirmed">Confirmed</option>
+                                <option value="completed">Completed</option>
+                                <option value="cancelled">Cancelled</option>
+                                <option value="expired">Expired</option>
                             </select>
-                            <input type="text" class="search-input" name="search" placeholder="Search bookings, customers, services..." value="<?php echo htmlspecialchars($filters['search'] ?? ''); ?>" style="flex:1;min-width:200px;">
-                            <select class="search-input" name="service_id">
+                            <input type="text" class="search-input" name="search" id="searchFilter" placeholder="Search bookings, customers, services..." style="flex:1;min-width:200px;">
+                            <select class="search-input" name="service_id" id="serviceFilter">
                                 <option value="">All Services</option>
-                                <?php foreach ($services as $service): ?>
-                                    <option value="<?php echo $service['ID']; ?>" <?php echo ($filters['service_id'] ?? '') == $service['ID'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($service['Name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
                             </select>
-                            <input type="date" class="search-input" name="date_from" placeholder="From" value="<?php echo htmlspecialchars($filters['date_from'] ?? ''); ?>">
-                            <input type="date" class="search-input" name="date_to" placeholder="To" value="<?php echo htmlspecialchars($filters['date_to'] ?? ''); ?>">
+                            <input type="date" class="search-input" name="date_from" id="dateFromFilter" placeholder="From">
+                            <input type="date" class="search-input" name="date_to" id="dateToFilter" placeholder="To">
                             <button type="button" class="btn btn-secondary" onclick="clearFilters()">Clear</button>
                         </form>
                     </div>
 
                     <!-- Bookings Grid -->
-                    <?php if (empty($bookings)): ?>
-                        <div class="empty-state">
+                    <div id="bookingsContainer">
+                        <div class="empty-state" id="bookingsEmpty" style="display:none;">
                             <i class="bi bi-calendar-x"></i>
                             <p>No bookings found</p>
                             <span class="subtitle">Bookings will appear here when customers submit requests</span>
                         </div>
-                    <?php else: ?>
-                    <div class="bookings-grid">
-                        <?php foreach ($bookings as $booking): ?>
-                        <div class="booking-card" onclick="viewBooking(<?php echo $booking['ID']; ?>)">
-                            <div class="card-header">
-                                <span class="service-name"><?php echo htmlspecialchars($booking['Service_Name']); ?></span>
-                                <span class="booking-status <?php echo $statusColors[$booking['Status']] ?? ''; ?>">
-                                    <?php echo $statusLabels[$booking['Status']] ?? $booking['Status']; ?>
-                                </span>
-                            </div>
-                            <div class="card-body">
-                                <div class="customer-row">
-                                    <div class="customer-avatar-small">
-                                        <?php echo strtoupper(substr($booking['Customer_Name'], 0, 1)); ?>
-                                    </div>
-                                    <div class="customer-details">
-                                        <strong><?php echo htmlspecialchars($booking['Customer_Name']); ?></strong>
-                                        <span class="customer-contact-small"><?php echo htmlspecialchars($booking['Customer_Email']); ?></span>
-                                    </div>
-                                </div>
-                                <div class="details-grid">
-                                    <div class="detail-item"><i class="bi bi-calendar-check"></i> <?php echo date('M d, Y', strtotime($booking['Date'])); ?></div>
-                                    <div class="detail-item"><i class="bi bi-clock"></i> <?php echo date('g:i A', strtotime($booking['Time'])); ?></div>
-                                    <div class="detail-item"><i class="bi bi-geo-alt"></i> <?php echo strlen($booking['Address']) > 25 ? substr(htmlspecialchars($booking['Address']), 0, 25) . '...' : htmlspecialchars($booking['Address']); ?></div>
-                                </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
-                                    <?php if ($booking['Quoted_Amount']): ?>
-                                    <div class="quote-info-compact">
-                                        <span class="quote-amount">R <?php echo number_format($booking['Quoted_Amount'], 2); ?></span>
-                                    </div>
-                                    <?php else: ?>
-                                    <div class="quote-info-compact">
-                                        <span class="quote-pending">Quote pending</span>
-                                    </div>
-                                    <?php endif; ?>
-                                    <div class="booking-created-date" style="font-size: 0.75rem; color: var(--text-light);">
-                                        <i class="bi bi-calendar-plus"></i> <?php echo getRelativeDate($booking['created_at']); ?>
-                                    </div>
-                                </div>
-                                <div class="card-actions">
-                                    <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); viewBooking(<?php echo $booking['ID']; ?>)">
-                                        <i class="bi bi-eye"></i> View
-                                    </button>
-                                    <?php if ($booking['Status'] === 'requested'): ?>
-                                        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); quickAction(<?php echo $booking['ID']; ?>, 'contact')">
-                                            <i class="bi bi-telephone"></i> Contact
-                                        </button>
-                                    <?php elseif ($booking['Status'] === 'contacted'): ?>
-                                        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); quickAction(<?php echo $booking['ID']; ?>, 'in_progress')">
-                                            <i class="bi bi-arrow-right"></i> In Progress
-                                        </button>
-                                        <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); openQuoteModal(<?php echo $booking['ID']; ?>, <?php echo $booking['Quoted_Amount'] ?? 'null'; ?>)">
-                                            <i class="bi bi-cash"></i> Quote
-                                        </button>
-                                    <?php elseif ($booking['Status'] === 'in_progress'): ?>
-                                        <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); openQuoteModal(<?php echo $booking['ID']; ?>, <?php echo $booking['Quoted_Amount'] ?? 'null'; ?>)">
-                                            <i class="bi bi-cash"></i> Quote
-                                        </button>
-                                    <?php elseif ($booking['Status'] === 'quoted'): ?>
-                                        <button class="btn btn-sm btn-info" onclick="event.stopPropagation(); viewQuoteDetails(<?php echo $booking['ID']; ?>, <?php echo htmlspecialchars(json_encode($booking['quote_breakdown'] ?? '')); ?>, <?php echo $booking['quote_validity_days'] ?? 7; ?>, <?php echo htmlspecialchars(json_encode($booking['quote_notes'] ?? '')); ?>, <?php echo $booking['Quoted_Amount'] ?? 0; ?>)">
-                                            <i class="bi bi-eye"></i> View Quote
-                                        </button>
-                                        <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); openQuoteModal(<?php echo $booking['ID']; ?>, <?php echo $booking['Quoted_Amount'] ?? 'null'; ?>)">
-                                            <i class="bi bi-pencil"></i> Update Quote
-                                        </button>
-                                    <?php elseif ($booking['Status'] === 'confirmed'): ?>
-                                        <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); updateStatus(<?php echo $booking['ID']; ?>, 'completed')">
-                                            <i class="bi bi-check-circle"></i> Complete
-                                        </button>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
+                        <div class="bookings-grid" id="bookingsGrid"></div>
+                        <div class="pagination" id="bookingsPagination" style="display:none;"></div>
                     </div>
-
-                    <!-- Pagination -->
-                    <?php if ($totalPages > 1): ?>
-                    <div class="pagination">
-                        <?php if ($currentPage > 1): ?>
-                            <a href="?section=bookings&page=<?php echo $currentPage - 1; ?>&status=<?php echo $filters['status'] ?? 'all'; ?>&search=<?php echo urlencode($filters['search'] ?? ''); ?>">&laquo; Prev</a>
-                        <?php else: ?>
-                            <span class="disabled">&laquo; Prev</span>
-                        <?php endif; ?>
-                        <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                            <?php if ($i == $currentPage): ?>
-                                <span class="current"><?php echo $i; ?></span>
-                            <?php else: ?>
-                                <a href="?section=bookings&page=<?php echo $i; ?>&status=<?php echo $filters['status'] ?? 'all'; ?>&search=<?php echo urlencode($filters['search'] ?? ''); ?>"><?php echo $i; ?></a>
-                            <?php endif; ?>
-                        <?php endfor; ?>
-                        <?php if ($currentPage < $totalPages): ?>
-                            <a href="?section=bookings&page=<?php echo $currentPage + 1; ?>&status=<?php echo $filters['status'] ?? 'all'; ?>&search=<?php echo urlencode($filters['search'] ?? ''); ?>">Next &raquo;</a>
-                        <?php else: ?>
-                            <span class="disabled">Next &raquo;</span>
-                        <?php endif; ?>
-                    </div>
-                    <?php endif; ?>
-                    <?php endif; ?>
                 </div>
 
                 <!-- ==================== SERVICES SECTION ==================== -->
-                <div class="content-section <?php echo $activeSection === 'services' ? 'active' : ''; ?>" id="section-services">
+                <div class="content-section" id="section-services">
                     <div class="section-header">
                         <h2>Manage Services</h2>
                         <button class="btn btn-primary" onclick="openModal('addServiceModal')">
@@ -847,7 +420,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-briefcase"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $totalServices; ?></h3>
+                                <h3 id="statServicesTotal">0</h3>
                                 <p>Total Services</p>
                             </div>
                         </div>
@@ -856,7 +429,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-check-circle"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $availableServices; ?></h3>
+                                <h3 id="statServicesAvailable">0</h3>
                                 <p>Available</p>
                             </div>
                         </div>
@@ -865,63 +438,23 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-pause-circle"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $totalServices - $availableServices; ?></h3>
+                                <h3 id="statServicesUnavailable">0</h3>
                                 <p>Unavailable</p>
                             </div>
                         </div>
                     </div>
 
                     <!-- Services Grid -->
-                    <?php if (empty($services)): ?>
-                        <div class="empty-state">
-                            <i class="bi bi-briefcase"></i>
-                            <p>No services yet</p>
-                            <span class="subtitle">Add your first service to get started</span>
-                        </div>
-                    <?php else: ?>
-                    <div class="cards-grid">
-                        <?php foreach ($services as $service): ?>
-                        <div class="item-card">
-                            <div class="item-image">
-                                <?php if (!empty($service['Image_URL'])): ?>
-                                    <img src="<?php echo htmlspecialchars($service['Image_URL']); ?>" alt="<?php echo htmlspecialchars($service['Name']); ?>">
-                                <?php else: ?>
-                                    <div class="placeholder"><i class="bi bi-briefcase"></i></div>
-                                <?php endif; ?>
-                                <span class="item-status <?php echo $service['Is_Available'] ? 'available' : 'unavailable'; ?>">
-                                    <?php echo $service['Is_Available'] ? 'Available' : 'Unavailable'; ?>
-                                </span>
-                            </div>
-                            <div class="item-content">
-                                <h4><?php echo htmlspecialchars($service['Name']); ?></h4>
-                                <p><?php echo htmlspecialchars($service['Description'] ?? 'No description'); ?></p>
-                                <div class="item-meta">
-                                    <span class="badge" style="background:var(--info-light);color:var(--info);padding:0.25rem 0.75rem;border-radius:20px;font-size:0.75rem;font-weight:600;">
-                                        <?php echo htmlspecialchars($service['Category'] ?? 'Uncategorized'); ?>
-                                    </span>
-                                    <span class="item-duration"><i class="bi bi-clock"></i> <?php echo $service['Duration']; ?> min</span>
-                                </div>
-                                <div class="item-actions">
-                                    <button class="btn btn-sm btn-primary" onclick="editService(<?php echo $service['ID']; ?>)">
-                                        <i class="bi bi-pencil"></i> Edit
-                                    </button>
-                                    <button class="btn btn-sm <?php echo $service['Is_Available'] ? 'btn-secondary' : 'btn-success'; ?>" 
-                                            onclick="toggleServiceAvailability(<?php echo $service['ID']; ?>, <?php echo $service['Is_Available'] ? 0 : 1; ?>)">
-                                        <i class="bi bi-toggle-<?php echo $service['Is_Available'] ? 'on' : 'off'; ?>"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteService(<?php echo $service['ID']; ?>)">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
+                    <div class="empty-state" id="servicesEmpty" style="display:none;">
+                        <i class="bi bi-briefcase"></i>
+                        <p>No services yet</p>
+                        <span class="subtitle">Add your first service to get started</span>
                     </div>
-                    <?php endif; ?>
+                    <div class="cards-grid" id="servicesGrid"></div>
                 </div>
 
                 <!-- ==================== PRODUCTS SECTION ==================== -->
-                <div class="content-section <?php echo $activeSection === 'products' ? 'active' : ''; ?>" id="section-products">
+                <div class="content-section" id="section-products">
                     <div class="section-header">
                         <h2>Manage Products</h2>
                         <button class="btn btn-primary" onclick="openModal('addProductModal')">
@@ -936,7 +469,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-box-seam"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $productStats['total'] ?? 0; ?></h3>
+                                <h3 id="statProductsTotal">0</h3>
                                 <p>Total Products</p>
                             </div>
                         </div>
@@ -945,7 +478,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-check-circle"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $productStats['available'] ?? 0; ?></h3>
+                                <h3 id="statProductsAvailable">0</h3>
                                 <p>Available</p>
                             </div>
                         </div>
@@ -954,7 +487,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-exclamation-triangle"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $productStats['low_stock_count'] ?? 0; ?></h3>
+                                <h3 id="statProductsLowStock">0</h3>
                                 <p>Low Stock</p>
                             </div>
                         </div>
@@ -963,66 +496,23 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-tags"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $productStats['categories_count'] ?? 0; ?></h3>
+                                <h3 id="statProductsCategories">0</h3>
                                 <p>Categories</p>
                             </div>
                         </div>
                     </div>
 
                     <!-- Products Grid -->
-                    <?php if (empty($products)): ?>
-                        <div class="empty-state">
-                            <i class="bi bi-box-seam"></i>
-                            <p>No products yet</p>
-                            <span class="subtitle">Add your first product to get started</span>
-                        </div>
-                    <?php else: ?>
-                    <div class="cards-grid">
-                        <?php foreach ($products as $product):
-                            $isLowStock = $product['Stock_Quantity'] <= 10 && $product['Stock_Quantity'] > 0;
-                            $isOutOfStock = $product['Stock_Quantity'] == 0;
-                        ?>
-                        <div class="item-card" <?php if ($isLowStock): ?>style="border:2px solid var(--warning);"<?php endif; ?>>
-                            <div class="item-image">
-                                <?php if (!empty($product['Image_URL'])): ?>
-                                    <img src="<?php echo htmlspecialchars($product['Image_URL']); ?>" alt="<?php echo htmlspecialchars($product['Name']); ?>">
-                                <?php else: ?>
-                                    <div class="placeholder"><i class="bi bi-box-seam"></i></div>
-                                <?php endif; ?>
-                                <span class="item-status <?php echo ($product['Is_Available'] && !$isOutOfStock) ? 'available' : 'unavailable'; ?>">
-                                    <?php echo ($product['Is_Available'] && !$isOutOfStock) ? 'Available' : 'Unavailable'; ?>
-                                </span>
-                            </div>
-                            <div class="item-content">
-                                <h4><?php echo htmlspecialchars($product['Name']); ?></h4>
-                                <p><?php echo htmlspecialchars($product['Description'] ?? 'No description'); ?></p>
-                                <div class="item-meta">
-                                    <span class="item-price">R <?php echo number_format($product['Price'], 2); ?></span>
-                                    <span class="item-stock" style="color:<?php echo $isLowStock ? 'var(--warning)' : ($isOutOfStock ? 'var(--danger)' : 'var(--text-light)'); ?>;font-weight:600;">
-                                        Stock: <?php echo $product['Stock_Quantity']; ?>
-                                    </span>
-                                </div>
-                                <div class="item-actions">
-                                    <button class="btn btn-sm btn-primary" onclick="editProduct(<?php echo $product['ID']; ?>)">
-                                        <i class="bi bi-pencil"></i> Edit
-                                    </button>
-                                    <button class="btn btn-sm <?php echo $product['Is_Available'] ? 'btn-secondary' : 'btn-success'; ?>" 
-                                            onclick="toggleProductAvailability(<?php echo $product['ID']; ?>, <?php echo $product['Is_Available'] ? 0 : 1; ?>)">
-                                        <i class="bi bi-toggle-<?php echo $product['Is_Available'] ? 'on' : 'off'; ?>"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-danger" onclick="deleteProduct(<?php echo $product['ID']; ?>)">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
+                    <div class="empty-state" id="productsEmpty" style="display:none;">
+                        <i class="bi bi-box-seam"></i>
+                        <p>No products yet</p>
+                        <span class="subtitle">Add your first product to get started</span>
                     </div>
-                    <?php endif; ?>
+                    <div class="cards-grid" id="productsGrid"></div>
                 </div>
 
                 <!-- ==================== CUSTOMERS SECTION ==================== -->
-                <div class="content-section <?php echo $activeSection === 'customers' ? 'active' : ''; ?>" id="section-customers">
+                <div class="content-section" id="section-customers">
                     <div class="section-header">
                         <h2>Customers</h2>
                     </div>
@@ -1034,7 +524,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-people"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $totalCustomers; ?></h3>
+                                <h3 id="statCustomersTotal">0</h3>
                                 <p>Total Customers</p>
                             </div>
                         </div>
@@ -1043,7 +533,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-calendar-check"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo count(array_filter($customers, fn($c) => strtotime($c['createdAt']) > strtotime('-30 days'))); ?></h3>
+                                <h3 id="statCustomersNew">0</h3>
                                 <p>New (30 days)</p>
                             </div>
                         </div>
@@ -1055,14 +545,12 @@ if (!in_array($activeSection, $validSections)) {
                     </div>
 
                     <!-- Customers Table -->
-                    <?php if (empty($customers)): ?>
-                        <div class="empty-state">
-                            <i class="bi bi-people"></i>
-                            <p>No customers yet</p>
-                            <span class="subtitle">Customers will appear here when they register or make bookings</span>
-                        </div>
-                    <?php else: ?>
-                    <div class="table-container">
+                    <div class="empty-state" id="customersEmpty" style="display:none;">
+                        <i class="bi bi-people"></i>
+                        <p>No customers yet</p>
+                        <span class="subtitle">Customers will appear here when they register or make bookings</span>
+                    </div>
+                    <div class="table-container" id="customersTable" style="display:none;">
                         <table class="data-table">
                             <thead>
                                 <tr>
@@ -1073,25 +561,67 @@ if (!in_array($activeSection, $validSections)) {
                                     <th>Joined</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                <?php foreach ($customers as $customer): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($customer['Full_Name']); ?></td>
-                                    <td><?php echo htmlspecialchars($customer['Email']); ?></td>
-                                    <td><?php echo htmlspecialchars($customer['Phone'] ?? 'N/A'); ?></td>
-                                    <td><?php echo htmlspecialchars($customer['Address'] ?? 'N/A'); ?></td>
-                                    <td><?php echo date('M d, Y', strtotime($customer['createdAt'])); ?></td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
+                            <tbody id="customersBody"></tbody>
                         </table>
                     </div>
-                    <?php endif; ?>
+                </div>
+
+                <!-- ==================== EMPLOYEES SECTION ==================== -->
+                <div class="content-section" id="section-employees">
+                    <div class="section-header">
+                        <h2>Employees</h2>
+                        <button class="btn btn-primary" onclick="openEmployeeModal()">
+                            <i class="bi bi-plus-lg"></i> Add Employee
+                        </button>
+                    </div>
+
+                    <!-- Employee Stats -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon bookings">
+                                <i class="bi bi-person-badge"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="statEmployeesTotal">0</h3>
+                                <p>Total Employees</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon revenue">
+                                <i class="bi bi-check-circle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="statEmployeesAvailable">0</h3>
+                                <p>Available</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Employees Table -->
+                    <div class="empty-state" id="employeesEmpty" style="display:none;">
+                        <i class="bi bi-person-badge"></i>
+                        <p>No employees yet</p>
+                        <span class="subtitle">Add employees so they can be assigned to bookings</span>
+                    </div>
+                    <div class="table-container" id="employeesTable" style="display:none;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Full Name</th>
+                                    <th>Email</th>
+                                    <th>Phone</th>
+                                    <th>Status</th>
+                                    <th>Joined</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="employeesBody"></tbody>
+                        </table>
+                    </div>
                 </div>
 
                 <!-- ==================== ADMINS SECTION ==================== -->
-                <?php if ($currentAdmin && $currentAdmin['Role'] === 'main_admin'): ?>
-                <div class="content-section <?php echo $activeSection === 'admins' ? 'active' : ''; ?>" id="section-admins">
+                <div class="content-section" id="section-admins" style="display:none;">
                     <div class="section-header">
                         <h2>Admin Management</h2>
                         <button class="btn btn-primary" onclick="openAdminModal()">
@@ -1106,7 +636,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-shield-lock"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo $totalAdmins; ?></h3>
+                                <h3 id="statAdminsTotal">0</h3>
                                 <p>Total Admins</p>
                             </div>
                         </div>
@@ -1115,7 +645,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-person-check"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo count(array_filter($admins, fn($a) => $a['Role'] === 'main_admin')); ?></h3>
+                                <h3 id="statAdminsMain">0</h3>
                                 <p>Main Admins</p>
                             </div>
                         </div>
@@ -1124,20 +654,18 @@ if (!in_array($activeSection, $validSections)) {
                                 <i class="bi bi-person"></i>
                             </div>
                             <div class="stat-info">
-                                <h3><?php echo count(array_filter($admins, fn($a) => $a['Role'] === 'sub_admin')); ?></h3>
+                                <h3 id="statAdminsSub">0</h3>
                                 <p>Sub-Admins</p>
                             </div>
                         </div>
                     </div>
 
                     <!-- Admins Table -->
-                    <?php if (empty($admins)): ?>
-                        <div class="empty-state">
-                            <i class="bi bi-shield-lock"></i>
-                            <p>No admins found</p>
-                        </div>
-                    <?php else: ?>
-                    <div class="table-container">
+                    <div class="empty-state" id="adminsEmpty" style="display:none;">
+                        <i class="bi bi-shield-lock"></i>
+                        <p>No admins found</p>
+                    </div>
+                    <div class="table-container" id="adminsTable" style="display:none;">
                         <table class="data-table">
                             <thead>
                                 <tr>
@@ -1149,61 +677,21 @@ if (!in_array($activeSection, $validSections)) {
                                     <th>Actions</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                <?php foreach ($admins as $admin): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($admin['Full_Name']); ?></td>
-                                    <td><?php echo htmlspecialchars($admin['Email']); ?></td>
-                                    <td><?php echo htmlspecialchars($admin['Phone'] ?? 'N/A'); ?></td>
-                                    <td>
-                                        <span class="badge <?php echo $admin['Role'] === 'main_admin' ? 'badge-primary' : 'badge-secondary'; ?>">
-                                            <?php echo $admin['Role'] === 'main_admin' ? 'Main Admin' : 'Sub-Admin'; ?>
-                                        </span>
-                                    </td>
-                                    <td><?php echo date('M d, Y', strtotime($admin['createdAt'])); ?></td>
-                                    <td>
-                                        <div class="action-buttons">
-                                            <button class="btn btn-sm btn-primary" onclick="editAdmin(<?php echo $admin['ID']; ?>)">
-                                                <i class="bi bi-pencil"></i>
-                                            </button>
-                                            <?php if ($admin['ID'] != $currentAdminId): ?>
-                                            <button class="btn btn-sm btn-danger" onclick="deleteAdmin(<?php echo $admin['ID']; ?>)">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                            <?php endif; ?>
-                                        </div>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
+                            <tbody id="adminsBody"></tbody>
                         </table>
                     </div>
-                    <?php endif; ?>
                 </div>
-                <?php endif; ?>
 
                 <!-- ==================== PROFILE SECTION ==================== -->
-                <div class="content-section <?php echo $activeSection === 'admin-profile' ? 'active' : ''; ?>" id="section-admin-profile">
+                <div class="content-section" id="section-admin-profile">
                     <div class="section-header">
                         <h2>My Profile</h2>
-                        <?php if (!$profileEditMode): ?>
-                        <a href="?section=admin-profile&edit_profile=1" class="btn btn-primary">
+                        <button class="btn btn-primary" id="editProfileBtn" onclick="setProfileEditMode(true)">
                             <i class="bi bi-pencil"></i> Edit Profile
-                        </a>
-                        <?php endif; ?>
+                        </button>
                     </div>
 
-                    <?php if ($profileMessage): ?>
-                    <div class="alert alert-success" style="margin-bottom:1.5rem;">
-                        <i class="bi bi-check-circle"></i> <?php echo $profileMessage; ?>
-                    </div>
-                    <?php endif; ?>
-                    
-                    <?php if ($profileError): ?>
-                    <div class="alert alert-error" style="margin-bottom:1.5rem;">
-                        <i class="bi bi-exclamation-circle"></i> <?php echo $profileError; ?>
-                    </div>
-                    <?php endif; ?>
+                    <div id="profileAlert" style="display:none;margin-bottom:1.5rem;"></div>
 
                     <div class="content-row">
                         <!-- Profile Info Card -->
@@ -1211,69 +699,7 @@ if (!in_array($activeSection, $validSections)) {
                             <div class="card-header">
                                 <h3><i class="bi bi-person-circle"></i> Profile Information</h3>
                             </div>
-                            <div class="card-body">
-                                <?php if ($profileEditMode): ?>
-                                <!-- Edit Mode Form -->
-                                <form method="post" action="?section=admin-profile">
-                                    <div class="form-group">
-                                        <label>Full Name <span class="text-danger">*</span></label>
-                                        <input type="text" name="full_name" class="form-input" value="<?php echo htmlspecialchars($currentAdmin['Full_Name'] ?? ''); ?>" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Email</label>
-                                        <input type="email" class="form-input" value="<?php echo htmlspecialchars($currentAdmin['Email'] ?? ''); ?>" disabled style="background:var(--secondary-color);">
-                                        <small style="color:var(--text-light);">Email cannot be changed</small>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Phone</label>
-                                        <input type="tel" name="phone" class="form-input" value="<?php echo htmlspecialchars($currentAdmin['Phone'] ?? ''); ?>" maxlength="10" placeholder="e.g., 0821234567">
-                                        <small style="color:var(--text-light);">10 digits (e.g., 0821234567)</small>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Role</label>
-                                        <input type="text" class="form-input" value="<?php echo $currentAdmin['Role'] === 'main_admin' ? 'Main Admin' : 'Sub-Admin'; ?>" disabled style="background:var(--secondary-color);">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Member Since</label>
-                                        <input type="text" class="form-input" value="<?php echo isset($currentAdmin['createdAt']) ? date('F d, Y', strtotime($currentAdmin['createdAt'])) : 'N/A'; ?>" disabled style="background:var(--secondary-color);">
-                                    </div>
-                                    <div class="form-actions" style="margin-top:1.5rem;">
-                                        <a href="?section=admin-profile" class="btn btn-secondary">Cancel</a>
-                                        <button type="submit" name="update_profile" class="btn btn-primary">
-                                            <i class="bi bi-check-lg"></i> Save Changes
-                                        </button>
-                                    </div>
-                                </form>
-                                <?php else: ?>
-                                <!-- View Mode -->
-                                <div class="profile-display">
-                                    <div class="info-item">
-                                        <label>Full Name</label>
-                                        <p><?php echo htmlspecialchars($currentAdmin['Full_Name'] ?? 'N/A'); ?></p>
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Email</label>
-                                        <p><?php echo htmlspecialchars($currentAdmin['Email'] ?? 'N/A'); ?></p>
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Phone</label>
-                                        <p><?php echo htmlspecialchars($currentAdmin['Phone'] ?? 'Not set'); ?></p>
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Role</label>
-                                        <p><span class="badge <?php echo $currentAdmin['Role'] === 'main_admin' ? 'badge-primary' : 'badge-secondary'; ?>"><?php echo $currentAdmin['Role'] === 'main_admin' ? 'Main Admin' : 'Sub-Admin'; ?></span></p>
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Member Since</label>
-                                        <p><?php echo isset($currentAdmin['createdAt']) ? date('F d, Y', strtotime($currentAdmin['createdAt'])) : 'N/A'; ?></p>
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Last Updated</label>
-                                        <p><?php echo isset($currentAdmin['updatedAt']) ? date('F d, Y', strtotime($currentAdmin['updatedAt'])) : 'N/A'; ?></p>
-                                    </div>
-                                </div>
-                                <?php endif; ?>
-                            </div>
+                            <div class="card-body" id="profileCardBody"></div>
                         </div>
 
                         <!-- Security Card -->
@@ -1285,7 +711,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <div class="security-item">
                                     <div class="security-info">
                                         <h4>Password</h4>
-                                        <p>Last changed: <?php echo isset($currentAdmin['updatedAt']) ? date('M d, Y', strtotime($currentAdmin['updatedAt'])) : 'Unknown'; ?></p>
+                                        <p>Last changed: <span id="profileLastChanged">Unknown</span></p>
                                     </div>
                                     <button class="btn btn-secondary" onclick="openModal('changePasswordModal')">
                                         <i class="bi bi-key"></i> Change Password
@@ -1294,7 +720,7 @@ if (!in_array($activeSection, $validSections)) {
                                 <div class="security-item" style="margin-top:1.5rem; padding-top:1.5rem; border-top:1px solid var(--border-color);">
                                     <div class="security-info">
                                         <h4>Account Status</h4>
-                                        <p><?php echo $currentAdmin['first_login'] ? '<span style="color:var(--warning);">First login - password reset required</span>' : '<span style="color:var(--success);">Active</span>'; ?></p>
+                                        <p id="profileAccountStatus"><span style="color:var(--success);">Active</span></p>
                                     </div>
                                 </div>
                                 <div class="security-item" style="margin-top:1.5rem; padding-top:1.5rem; border-top:1px solid var(--border-color);">
@@ -1302,7 +728,7 @@ if (!in_array($activeSection, $validSections)) {
                                         <h4>Session</h4>
                                         <p>Manage your active session</p>
                                     </div>
-                                    <a href="includes/logout.inc.php" class="btn btn-danger">
+                                    <a href="#" class="btn btn-danger" id="profileLogoutBtn">
                                         <i class="bi bi-box-arrow-right"></i> Logout
                                     </a>
                                 </div>
@@ -1312,7 +738,7 @@ if (!in_array($activeSection, $validSections)) {
                 </div>
 
             </div><!-- end content-sections -->
-        
+
         <!-- Admin Footer -->
         <footer class="admin-footer">
             <div class="admin-footer-container">
@@ -1408,6 +834,30 @@ if (!in_array($activeSection, $validSections)) {
         </div>
     </div>
 
+    <!-- Assign Employee Modal -->
+    <div class="modal" id="assignModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="bi bi-person-badge"></i> Assign Employee</h2>
+                <button class="modal-close" onclick="closeModal('assignModal')">&times;</button>
+            </div>
+            <form id="assignForm">
+                <input type="hidden" id="assignBookingId">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Available Employee <span class="text-danger">*</span></label>
+                        <select class="form-input" id="assignEmployeeId" required></select>
+                        <small style="color:var(--text-light);">The employee will see this job on their mobile app and can start/complete it there.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('assignModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Assign</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Add Service Modal -->
     <div class="modal" id="addServiceModal">
         <div class="modal-content">
@@ -1445,6 +895,7 @@ if (!in_array($activeSection, $validSections)) {
                     <div class="form-group">
                         <label>Service Image</label>
                         <input type="file" class="form-input" name="image" accept="image/*">
+                        <small style="color:var(--text-light);">Stored in the service record — keep under ~700 KB.</small>
                     </div>
                     <div class="form-check">
                         <input type="checkbox" name="Is_Available" value="1" checked>
@@ -1548,6 +999,7 @@ if (!in_array($activeSection, $validSections)) {
                     <div class="form-group">
                         <label>Product Image</label>
                         <input type="file" class="form-input" name="image" accept="image/*">
+                        <small style="color:var(--text-light);">Stored in the product record — keep under ~700 KB.</small>
                     </div>
                     <div class="form-check">
                         <input type="checkbox" name="Is_Available" value="1" checked>
@@ -1678,6 +1130,58 @@ if (!in_array($activeSection, $validSections)) {
         </div>
     </div>
 
+    <!-- Employee Modal (Add only) -->
+    <div class="modal" id="employeeModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="employeeModalTitle"><i class="bi bi-person-badge"></i> Add Employee</h2>
+                <button class="modal-close" onclick="closeModal('employeeModal')">&times;</button>
+            </div>
+            <form id="employeeForm">
+                <input type="hidden" id="employeeGeneratedPassword">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Full Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-input" id="employeeName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Email <span class="text-danger">*</span></label>
+                        <input type="email" class="form-input" id="employeeEmail" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Phone <span class="text-danger">*</span></label>
+                        <input type="tel" class="form-input" id="employeePhone" required>
+                    </div>
+                    <div id="employeePasswordDisplaySection" style="display:none; margin-top:1.5rem; padding:1.5rem; background:var(--success-light); border:2px solid var(--success); border-radius:var(--border-radius);">
+                        <div style="text-align:center; margin-bottom:1rem;">
+                            <i class="bi bi-check-circle-fill" style="font-size:2rem; color:var(--success);"></i>
+                            <h3 style="margin:0.5rem 0; color:var(--success);">Password Generated!</h3>
+                            <p style="margin:0; color:var(--text-light); font-size:0.9rem;">Copy this password and share it with the new employee</p>
+                        </div>
+                        <div style="display:flex; gap:0.5rem; margin-bottom:1rem;">
+                            <input type="text" id="employeeDisplayPassword" class="form-input" style="text-align:center; font-family:monospace; font-size:1.1rem; font-weight:600; letter-spacing:1px;" readonly>
+                            <button type="button" class="btn btn-primary" onclick="copyEmployeePassword()" style="white-space:nowrap;">
+                                <i class="bi bi-clipboard"></i> Copy
+                            </button>
+                        </div>
+                        <div id="employeeCopyFeedback" style="text-align:center; color:var(--success); font-weight:500; display:none;">
+                            <i class="bi bi-check"></i> Password copied to clipboard!
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer" id="employeeModalFooter">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('employeeModal')">Cancel</button>
+                    <button type="button" id="generateEmployeePasswordBtn" class="btn btn-warning" onclick="generateEmployeePassword()">
+                        <i class="bi bi-key"></i> Generate Password
+                    </button>
+                    <button type="submit" id="saveEmployeeBtn" class="btn btn-primary" style="display:none;">
+                        <i class="bi bi-check-lg"></i> Save Employee
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Change Password Modal -->
     <div class="modal" id="changePasswordModal">
         <div class="modal-content">
@@ -1693,12 +1197,12 @@ if (!in_array($activeSection, $validSections)) {
                     </div>
                     <div class="form-group">
                         <label>New Password <span class="text-danger">*</span></label>
-                        <input type="password" class="form-input" id="newPassword" minlength="8" required>
+                        <input type="password" class="form-input" id="newPasswordChange" minlength="8" required>
                         <small style="color:var(--text-light);">Minimum 8 characters</small>
                     </div>
                     <div class="form-group">
                         <label>Confirm New Password <span class="text-danger">*</span></label>
-                        <input type="password" class="form-input" id="confirmPassword" required>
+                        <input type="password" class="form-input" id="confirmPasswordChange" required>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1713,38 +1217,144 @@ if (!in_array($activeSection, $validSections)) {
     <div id="toastContainer" style="position:fixed;top:20px;right:20px;z-index:99999;"></div>
 
     <script src="./js/modal.js"></script>
-    <script>
-        // ========== DATA ==========
-        const bookings = <?php echo json_encode($bookings); ?>;
-        const services = <?php echo json_encode($services); ?>;
-        const products = <?php echo json_encode($products); ?>;
-        const customers = <?php echo json_encode($customers); ?>;
-        const admins = <?php echo json_encode($admins); ?>;
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script type="module">
+        import { whenAuthReady, pmaSignOut, pmaChangePassword, authErrorMessage } from './js/firebase/auth.js';
+        import {
+            watchAllRequests, updateRequest,
+            watchServices, createService, updateService, setServiceAvailability, deleteService as deleteServiceDoc,
+            watchProducts, createProduct, updateProduct, setProductAvailability, deleteProduct as deleteProductDoc,
+            watchCustomers, watchEmployees, setEmployeeAvailability, updateUserProfile,
+            getAdminDoc, createAdminDoc, updateAdminDoc, deleteAdminDoc, watchAdmins,
+            watchStaffNotifications, addNotification, markNotificationRead, markAllNotificationsRead
+        } from './js/firebase/data.js';
+        import { downloadQuotePdf } from './js/firebase/quotePdf.js';
+        import { auth, db } from './js/firebase/app.js';
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
+        import { getAuth, createUserWithEmailAndPassword, updatePassword, signOut as fbSignOut } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
+        import { collection, getDocs, doc, setDoc } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js';
 
-        // ========== SECTION NAVIGATION ==========
+        // ==================== STATE ====================
+        let currentUser = null;
+        let currentAdmin = null;
+        let isMainAdmin = false;
+        let bookings = [];      // mapped to legacy field names (Status = legacy key)
+        let services = [];
+        let products = [];
+        let customers = [];
+        let employees = [];
+        let admins = [];
+        let notifications = [];
+        let profileEditMode = new URLSearchParams(location.search).get('edit_profile') === '1';
+        let currentPage = 1;
+        const PAGE_SIZE = 10;
+        const expiryHandled = new Set();
+        let emailJsReady = false;
+
+        // Firestore status -> the lowercase key the old PHP page used for CSS/labels
+        const FS_TO_LEGACY = {
+            'Pending': 'requested',
+            'Contacted': 'contacted',
+            'Quoted': 'quoted',
+            'Confirmed': 'confirmed',
+            'Approved': 'in_progress',
+            'In Progress': 'in_progress',
+            'Completed': 'completed',
+            'Rejected': 'cancelled',
+            'Cancelled': 'cancelled',
+            'Expired': 'expired'
+        };
+        const LEGACY_TO_FS = {
+            'requested': 'Pending',
+            'contacted': 'Contacted',
+            'in_progress': 'In Progress',
+            'quoted': 'Quoted',
+            'confirmed': 'Confirmed',
+            'completed': 'Completed',
+            'cancelled': 'Cancelled',
+            'expired': 'Expired'
+        };
+        const statusLabels = {
+            'requested': 'Requested',
+            'contacted': 'Contacted',
+            'in_progress': 'In Progress',
+            'quoted': 'Quoted',
+            'confirmed': 'Confirmed',
+            'completed': 'Completed',
+            'cancelled': 'Cancelled',
+            'expired': 'Expired'
+        };
+
+        // ==================== HELPERS ====================
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+        const fmtMoney = (n) => 'R ' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+        const fmtDateLong = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A';
+        const fmtDateTime = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+        const fmtTime = (t) => {
+            if (!t) return '';
+            try { return new Date('2000-01-01T' + t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+            catch (e) { return t; }
+        };
+
+        function fileToDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                if (!file || !file.size) return resolve('');
+                if (file.size > 800 * 1024) return reject(new Error('Image is too large — please use a file under 800 KB.'));
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error('Could not read image file'));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function initEmailJs() {
+            if (emailJsReady || !window.emailjs || !window.CONFIG?.EMAILJS?.PUBLIC_KEY) return;
+            try { window.emailjs.init(window.CONFIG.EMAILJS.PUBLIC_KEY); emailJsReady = true; } catch (e) {}
+        }
+
+        async function sendCustomerEmail(toEmail, toName, subject, message) {
+            initEmailJs();
+            if (!emailJsReady) return;
+            try {
+                await window.emailjs.send(
+                    window.CONFIG.EMAILJS.SERVICE_ID,
+                    window.CONFIG.EMAILJS.CONTACT_TEMPLATE_ID,
+                    { to_email: toEmail, to_name: toName, subject, message, reply_to: window.CONFIG.SUPPORT_EMAIL }
+                );
+            } catch (e) {
+                console.warn('EmailJS send failed (notification still created):', e);
+            }
+        }
+
+        // ==================== SECTION NAVIGATION ====================
         const sectionTitles = {
             dashboard: 'Dashboard',
             bookings: 'Manage Bookings',
             services: 'Manage Services',
             products: 'Manage Products',
             customers: 'Customer Management',
+            employees: 'Employees',
             admins: 'Admin Management',
             'admin-profile': 'My Profile'
         };
 
         function switchSection(section) {
-            // Hide all sections
-            document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
-            // Show target section
+            document.querySelectorAll('.content-section').forEach(s => {
+                s.classList.remove('active');
+                if (s.id !== 'section-admins') s.style.display = '';
+            });
             const target = document.getElementById('section-' + section);
-            if (target) target.classList.add('active');
-            // Update nav links
+            if (target) {
+                target.classList.add('active');
+                if (target.id === 'section-admins' && isMainAdmin) target.style.display = '';
+            }
             document.querySelectorAll('.nav-link').forEach(link => {
                 link.classList.toggle('active', link.dataset.section === section);
             });
-            // Update header title
             document.getElementById('sectionTitle').textContent = sectionTitles[section] || 'Dashboard';
-            // Update URL without reload
             const url = new URL(window.location);
             url.searchParams.set('section', section);
             url.searchParams.delete('page');
@@ -1753,100 +1363,10 @@ if (!in_array($activeSection, $validSections)) {
             history.pushState({}, '', url);
         }
 
-        // Nav link clicks
-        document.querySelectorAll('.nav-link[data-section]').forEach(link => {
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                switchSection(link.dataset.section);
-                // Close sidebar after navigation
-                document.querySelector('.sidebar').classList.remove('mobile-open');
-                if (sidebarOverlay) {
-                    sidebarOverlay.classList.remove('active');
-                }
-            });
-        });
+        // ==================== MODAL / TOAST (unchanged helpers) ====================
+        function openModal(id) { document.getElementById(id).classList.add('active'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
-        // ========== REAL-TIME BOOKING FILTERING ==========
-        const bookingFilterForm = document.getElementById('bookingFilterForm');
-        if (bookingFilterForm) {
-            // Add event listeners to all filter inputs for real-time filtering
-            const filterInputs = bookingFilterForm.querySelectorAll('input, select');
-            filterInputs.forEach(input => {
-                // Use 'input' for text fields and 'change' for selects/dates
-                const eventType = (input.type === 'text' || input.type === 'search') ? 'input' : 'change';
-                input.addEventListener(eventType, function() {
-                    // Debounce to avoid too many requests
-                    clearTimeout(this.filterTimeout);
-                    this.filterTimeout = setTimeout(() => {
-                        bookingFilterForm.submit();
-                    }, 300);
-                });
-            });
-        }
-
-        // Clear filters function
-        function clearFilters() {
-            const form = document.getElementById('bookingFilterForm');
-            if (form) {
-                // Reset all inputs except section
-                form.querySelectorAll('input:not([name="section"]), select').forEach(input => {
-                    input.value = '';
-                });
-                form.submit();
-            }
-        }
-
-        // Quick action / view-all clicks
-        document.querySelectorAll('[data-section]').forEach(el => {
-            if (el.classList.contains('nav-link')) return; // already handled
-            el.addEventListener('click', (e) => {
-                e.preventDefault();
-                switchSection(el.dataset.section);
-            });
-        });
-
-        // Sidebar mobile toggle
-        const sidebarToggle = document.getElementById('sidebarToggle');
-        const headerToggle = document.getElementById('headerToggle');
-        const sidebar = document.getElementById('sidebar');
-        const sidebarOverlay = document.querySelector('.sidebar-overlay');
-        
-        function toggleSidebar() {
-            sidebar.classList.toggle('mobile-open');
-            if (sidebarOverlay) {
-                sidebarOverlay.classList.toggle('active');
-            }
-        }
-        
-        if (sidebarToggle) {
-            sidebarToggle.addEventListener('click', toggleSidebar);
-        }
-        
-        if (headerToggle) {
-            headerToggle.addEventListener('click', toggleSidebar);
-        }
-        
-        // Close sidebar when clicking overlay
-        if (sidebarOverlay) {
-            sidebarOverlay.addEventListener('click', toggleSidebar);
-        }
-
-        // ========== MODAL HELPERS ==========
-        function openModal(id) {
-            document.getElementById(id).classList.add('active');
-        }
-        function closeModal(id) {
-            document.getElementById(id).classList.remove('active');
-        }
-
-        // Close modal on backdrop click
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) modal.classList.remove('active');
-            });
-        });
-
-        // ========== TOAST ==========
         function showToast(message, type = 'success') {
             const toast = document.createElement('div');
             const icons = {
@@ -1855,14 +1375,12 @@ if (!in_array($activeSection, $validSections)) {
                 warning: '<i class="fas fa-exclamation-triangle"></i>',
                 info: '<i class="fas fa-info-circle"></i>'
             };
-            
             const colors = {
                 success: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                 danger: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
                 warning: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
                 info: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
             };
-            
             toast.style.cssText = `
                 padding: 1rem 1.5rem; border-radius: 12px; color: #fff; margin-bottom: 0.75rem;
                 background: ${colors[type] || colors.success};
@@ -1870,54 +1388,12 @@ if (!in_array($activeSection, $validSections)) {
                 animation: toastSlideIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55); font-weight: 600;
                 min-width: 300px; max-width: 400px;
             `;
-            toast.innerHTML = `${icons[type] || icons.success}<span>${message}</span>`;
+            toast.innerHTML = `${icons[type] || icons.success}<span>${esc(message)}</span>`;
             document.getElementById('toastContainer').appendChild(toast);
-            
             setTimeout(() => {
                 toast.style.animation = 'toastSlideOut 0.3s ease forwards';
                 setTimeout(() => toast.remove(), 300);
             }, 4000);
-        }
-        
-        // Add toast animations
-        const toastStyles = document.createElement('style');
-        toastStyles.textContent = `
-            @keyframes toastSlideIn {
-                from {
-                    opacity: 0;
-                    transform: translateX(100%);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-            }
-            
-            @keyframes toastSlideOut {
-                from {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-                to {
-                    opacity: 0;
-                    transform: translateX(100%);
-                }
-            }
-        `;
-        document.head.appendChild(toastStyles);
-
-        // ========== BOOKINGS FUNCTIONS ==========
-        function getStatusColor(status) {
-            const colors = {
-                'requested': 'var(--warning)',
-                'contacted': 'var(--info)',
-                'in_progress': 'var(--primary-color)',
-                'quoted': 'var(--text-light)',
-                'confirmed': 'var(--success)',
-                'completed': '#2c3e50',
-                'cancelled': 'var(--danger)'
-            };
-            return colors[status] || 'var(--text-light)';
         }
 
         function getRelativeDate(dateString) {
@@ -1926,255 +1402,259 @@ if (!in_array($activeSection, $validSections)) {
             today.setHours(0, 0, 0, 0);
             const yesterday = new Date(today);
             yesterday.setDate(yesterday.getDate() - 1);
-
             const checkDate = new Date(date);
             checkDate.setHours(0, 0, 0, 0);
-
             const diffDays = Math.floor((today - checkDate) / (1000 * 60 * 60 * 24));
+            if (checkDate.getTime() === today.getTime()) return 'Today';
+            if (checkDate.getTime() === yesterday.getTime()) return 'Yesterday';
+            if (diffDays === 2) return 'Day before yesterday';
+            if (diffDays <= 7) return date.toLocaleDateString('en-US', { weekday: 'long' });
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        }
 
-            if (checkDate.getTime() === today.getTime()) {
-                return 'Today';
-            } else if (checkDate.getTime() === yesterday.getTime()) {
-                return 'Yesterday';
-            } else if (diffDays === 2) {
-                return 'Day before yesterday';
-            } else if (diffDays <= 7) {
-                return date.toLocaleDateString('en-US', { weekday: 'long' });
+        // ==================== RENDER: DASHBOARD ====================
+        function renderDashboard() {
+            document.getElementById('statTotalBookings').textContent = bookings.length;
+            document.getElementById('statPendingContact').textContent = bookings.filter(b => b.Status === 'requested').length;
+            document.getElementById('statTotalServices').textContent = services.length;
+            document.getElementById('statTotalProducts').textContent = products.length;
+
+            const body = document.getElementById('recentBookingsBody');
+            if (!bookings.length) {
+                body.innerHTML = `<div class="empty-state"><i class="bi bi-calendar-x"></i><p>No bookings yet</p></div>`;
+                return;
+            }
+            body.innerHTML = bookings.slice(0, 5).map(b => `
+                <div class="booking-item">
+                    <div class="booking-avatar">${esc((b.Customer_Name || '?').charAt(0).toUpperCase())}</div>
+                    <div class="booking-info">
+                        <h4>${esc(b.Customer_Name)}</h4>
+                        <p>${esc(b.Service_Name)} - ${getRelativeDate(b.created_at)}</p>
+                    </div>
+                    <div class="booking-meta">
+                        <span class="booking-status ${b.Status}">${statusLabels[b.Status] || b.Status}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // ==================== RENDER: BOOKINGS ====================
+        function getFilteredBookings() {
+            const status = document.getElementById('statusFilter').value;
+            const search = (document.getElementById('searchFilter').value || '').toLowerCase();
+            const serviceId = document.getElementById('serviceFilter').value;
+            const dateFrom = document.getElementById('dateFromFilter').value;
+            const dateTo = document.getElementById('dateToFilter').value;
+
+            return bookings.filter(b => {
+                if (status && b.Status !== status) return false;
+                if (serviceId && b.Service_ID !== serviceId) return false;
+                if (dateFrom && b.Date < dateFrom) return false;
+                if (dateTo && b.Date > dateTo) return false;
+                if (search) {
+                    const hay = `${b.Customer_Name} ${b.Customer_Email} ${b.Service_Name} ${b.Address} ${b.refNumber}`.toLowerCase();
+                    if (!hay.includes(search)) return false;
+                }
+                return true;
+            });
+        }
+
+        function renderBookingStats() {
+            const today = new Date().toISOString().slice(0, 10);
+            document.getElementById('statTodayRequests').textContent =
+                bookings.filter(b => (b.created_at || '').slice(0, 10) === today).length;
+            document.getElementById('statNeedContact').textContent =
+                bookings.filter(b => b.Status === 'requested').length;
+            document.getElementById('statNeedQuote').textContent =
+                bookings.filter(b => b.Status === 'contacted').length;
+            document.getElementById('statUpcoming').textContent =
+                bookings.filter(b => ['confirmed', 'in_progress'].includes(b.Status) && b.Date >= today).length;
+        }
+
+        function bookingActionButtons(b) {
+            const id = `'${b.ID}'`;
+            const amount = b.Quoted_Amount ?? 'null';
+            let html = `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); viewBooking(${id})"><i class="bi bi-eye"></i> View</button>`;
+            if (b.Status === 'requested') {
+                html += `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); quickAction(${id}, 'contact')"><i class="bi bi-telephone"></i> Contact</button>`;
+                html += `<button class="btn btn-sm btn-info" onclick="event.stopPropagation(); openAssignModal(${id})"><i class="bi bi-person-badge"></i> Assign</button>`;
+            } else if (b.Status === 'contacted') {
+                html += `<button class="btn btn-sm btn-success" onclick="event.stopPropagation(); openQuoteModal(${id}, ${amount})"><i class="bi bi-cash"></i> Quote</button>`;
+                html += `<button class="btn btn-sm btn-info" onclick="event.stopPropagation(); openAssignModal(${id})"><i class="bi bi-person-badge"></i> Assign</button>`;
+            } else if (b.Status === 'in_progress') {
+                if (!b.Quoted_Amount) {
+                    html += `<button class="btn btn-sm btn-success" onclick="event.stopPropagation(); openQuoteModal(${id}, ${amount})"><i class="bi bi-cash"></i> Quote</button>`;
+                }
+                html += `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); updateStatus(${id}, 'completed')"><i class="bi bi-check-circle"></i> Complete</button>`;
+            } else if (b.Status === 'quoted') {
+                html += `<button class="btn btn-sm btn-info" onclick="event.stopPropagation(); viewQuoteDetailsById(${id})"><i class="bi bi-eye"></i> View Quote</button>`;
+                html += `<button class="btn btn-sm btn-success" onclick="event.stopPropagation(); openQuoteModal(${id}, ${amount})"><i class="bi bi-pencil"></i> Update Quote</button>`;
+            } else if (b.Status === 'confirmed') {
+                html += `<button class="btn btn-sm btn-info" onclick="event.stopPropagation(); openAssignModal(${id})"><i class="bi bi-person-badge"></i> Assign</button>`;
+                html += `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); updateStatus(${id}, 'completed')"><i class="bi bi-check-circle"></i> Complete</button>`;
+            }
+            return html;
+        }
+
+        function renderBookings() {
+            renderBookingStats();
+            const filtered = getFilteredBookings();
+            const grid = document.getElementById('bookingsGrid');
+            const empty = document.getElementById('bookingsEmpty');
+            const pagination = document.getElementById('bookingsPagination');
+
+            if (!filtered.length) {
+                grid.innerHTML = '';
+                empty.style.display = '';
+                pagination.style.display = 'none';
+                return;
+            }
+            empty.style.display = 'none';
+
+            const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+            if (currentPage > totalPages) currentPage = totalPages;
+            const pageItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+            grid.innerHTML = pageItems.map(b => `
+                <div class="booking-card" onclick="viewBooking('${b.ID}')">
+                    <div class="card-header">
+                        <span class="service-name">${esc(b.Service_Name)}</span>
+                        <span class="booking-status ${b.Status}">${statusLabels[b.Status] || b.Status}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="customer-row">
+                            <div class="customer-avatar-small">${esc((b.Customer_Name || '?').charAt(0).toUpperCase())}</div>
+                            <div class="customer-details">
+                                <strong>${esc(b.Customer_Name)}</strong>
+                                <span class="customer-contact-small">${esc(b.Customer_Email)}</span>
+                            </div>
+                        </div>
+                        <div class="details-grid">
+                            <div class="detail-item"><i class="bi bi-calendar-check"></i> ${fmtDate(b.Date)}</div>
+                            <div class="detail-item"><i class="bi bi-clock"></i> ${fmtTime(b.Time)}</div>
+                            <div class="detail-item"><i class="bi bi-geo-alt"></i> ${esc(b.Address && b.Address.length > 25 ? b.Address.slice(0, 25) + '...' : b.Address)}</div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+                            ${b.Quoted_Amount
+                                ? `<div class="quote-info-compact"><span class="quote-amount">${fmtMoney(b.Quoted_Amount)}</span></div>`
+                                : `<div class="quote-info-compact"><span class="quote-pending">Quote pending</span></div>`}
+                            <div class="booking-created-date" style="font-size: 0.75rem; color: var(--text-light);">
+                                <i class="bi bi-calendar-plus"></i> ${getRelativeDate(b.created_at)}
+                            </div>
+                        </div>
+                        ${b.employeeName ? `<div style="font-size:0.8rem;color:var(--info);margin-top:0.25rem;"><i class="bi bi-person-badge"></i> ${esc(b.employeeName)}</div>` : ''}
+                        <div class="card-actions">${bookingActionButtons(b)}</div>
+                    </div>
+                </div>
+            `).join('');
+
+            if (totalPages > 1) {
+                pagination.style.display = '';
+                let ph = currentPage > 1
+                    ? `<a href="#" onclick="goPage(${currentPage - 1}); return false;">&laquo; Prev</a>`
+                    : `<span class="disabled">&laquo; Prev</span>`;
+                for (let i = 1; i <= totalPages; i++) {
+                    ph += i === currentPage
+                        ? `<span class="current">${i}</span>`
+                        : `<a href="#" onclick="goPage(${i}); return false;">${i}</a>`;
+                }
+                ph += currentPage < totalPages
+                    ? `<a href="#" onclick="goPage(${currentPage + 1}); return false;">Next &raquo;</a>`
+                    : `<span class="disabled">Next &raquo;</span>`;
+                pagination.innerHTML = ph;
             } else {
-                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                pagination.style.display = 'none';
             }
         }
 
-        function viewBooking(id) {
-            const booking = bookings.find(b => b.ID == id);
-            if (!booking) return;
+        function goPage(n) { currentPage = n; renderBookings(); }
 
-            const status = booking.Status;
-            const canQuote = status === 'requested' || status === 'contacted' || status === 'in_progress';
-            const canContact = status === 'requested';
-            const hasQuote = booking.Quoted_Amount && booking.Quoted_Amount > 0;
-
-            const detailsHtml = `
-                <div class="booking-details-grid">
-                    <!-- Service Information Card -->
-                    <div style="background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
-                        <h4 style="margin-bottom: 1rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
-                            <i class="bi bi-briefcase"></i> Service Information
-                        </h4>
-                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-tag" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Service</span>
-                                    <p style="margin: 0; font-weight: 500;">${booking.Service_Name}</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-clock" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Duration</span>
-                                    <p style="margin: 0; font-weight: 500;">${booking.Service_Duration} minutes</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-calendar-plus" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Booked</span>
-                                    <p style="margin: 0; font-weight: 500;">${getRelativeDate(booking.created_at)}</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-calendar-check" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Scheduled</span>
-                                    <p style="margin: 0; font-weight: 500;">${new Date(booking.Date).toLocaleDateString()}</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-clock-history" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Time</span>
-                                    <p style="margin: 0; font-weight: 500;">${new Date('2000-01-01T' + booking.Time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-info-circle" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Status</span>
-                                    <p style="margin: 0;">
-                                        <span class="badge ${status === 'requested' ? 'badge-warning' : status === 'confirmed' ? 'badge-success' : status === 'cancelled' ? 'badge-danger' : 'badge-info'}" style="text-transform: capitalize;">${booking.Status}</span>
-                                    </p>
-                                </div>
-                            </div>
-                            ${hasQuote ? `
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-cash" style="color: var(--success); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Quote</span>
-                                    <p style="margin: 0; font-weight: 500; color: var(--success);">R ${parseFloat(booking.Quoted_Amount).toFixed(2)}</p>
-                                </div>
-                            </div>
-                            ` : ''}
-                        </div>
-                    </div>
-
-                    <!-- Customer Information Card -->
-                    <div style="background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
-                        <h4 style="margin-bottom: 1rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
-                            <i class="bi bi-person"></i> Customer Information
-                        </h4>
-                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-person-circle" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Name</span>
-                                    <p style="margin: 0; font-weight: 500;">${booking.Customer_Name}</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-envelope" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Email</span>
-                                    <p style="margin: 0; font-weight: 500;">${booking.Customer_Email}</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                <i class="bi bi-telephone" style="color: var(--primary-color); width: 20px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Phone</span>
-                                    <p style="margin: 0; font-weight: 500;">${booking.Customer_Phone || 'N/A'}</p>
-                                </div>
-                            </div>
-                            <div style="display: flex; align-items: start; gap: 0.75rem;">
-                                <i class="bi bi-geo-alt" style="color: var(--primary-color); width: 20px; margin-top: 2px;"></i>
-                                <div>
-                                    <span style="color: var(--text-light); font-size: 0.85rem;">Address</span>
-                                    <p style="margin: 0; font-weight: 500;">${booking.Address}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                ${booking.Special_Instructions ? `
-                <div style="margin-top: 1.5rem; background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
-                    <h4 style="margin-bottom: 0.75rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
-                        <i class="bi bi-chat-text"></i> Special Instructions
-                    </h4>
-                    <p style="margin: 0; padding: 1rem; background: white; border-radius: 8px; border-left: 4px solid var(--primary-color);">${booking.Special_Instructions}</p>
-                </div>
-                ` : ''}
-
-                ${booking.Property_Type ? `
-                <div style="margin-top: 1.5rem; background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
-                    <h4 style="margin-bottom: 1rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
-                        <i class="bi bi-house"></i> Property Details
-                    </h4>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
-                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <i class="bi bi-building" style="color: var(--primary-color); width: 20px;"></i>
-                            <div>
-                                <span style="color: var(--text-light); font-size: 0.85rem;">Type</span>
-                                <p style="margin: 0; font-weight: 500;">${booking.Property_Type}</p>
-                            </div>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <i class="bi bi-aspect-ratio" style="color: var(--primary-color); width: 20px;"></i>
-                            <div>
-                                <span style="color: var(--text-light); font-size: 0.85rem;">Size</span>
-                                <p style="margin: 0; font-weight: 500;">${booking.Property_Size || 'N/A'}</p>
-                            </div>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <i class="bi bi-arrow-repeat" style="color: var(--primary-color); width: 20px;"></i>
-                            <div>
-                                <span style="color: var(--text-light); font-size: 0.85rem;">Frequency</span>
-                                <p style="margin: 0; font-weight: 500;">${booking.Cleaning_Frequency || 'N/A'}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                ` : ''}
-            `;
-
-            let actionsHtml = '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">';
-            if (canContact) {
-                actionsHtml += `<button type="button" class="btn btn-primary btn-sm" onclick="contactCustomer(${booking.ID}, '${booking.Customer_Email}')"><i class="bi bi-telephone"></i> Contact Customer</button>`;
-            }
-            if (canQuote) {
-                actionsHtml += `<button type="button" class="btn btn-success btn-sm" onclick="closeModal('bookingModal'); openQuoteModal(${booking.ID}, ${booking.Quoted_Amount || 'null'})"><i class="bi bi-cash"></i> ${hasQuote ? 'Update Quote' : 'Provide Quote'}</button>`;
-            }
-            if (hasQuote) {
-                actionsHtml += `<button type="button" class="btn btn-info btn-sm" onclick="downloadQuotePDF(${booking.ID})"><i class="bi bi-file-pdf"></i> Download PDF</button>`;
-            }
-            actionsHtml += `<button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('bookingModal')">Close</button></div>`;
-
-            document.getElementById('bookingDetails').innerHTML = detailsHtml;
-            document.getElementById('bookingActions').innerHTML = actionsHtml;
-            openModal('bookingModal');
+        function clearFilters() {
+            document.getElementById('statusFilter').value = '';
+            document.getElementById('searchFilter').value = '';
+            document.getElementById('serviceFilter').value = '';
+            document.getElementById('dateFromFilter').value = '';
+            document.getElementById('dateToFilter').value = '';
+            currentPage = 1;
+            renderBookings();
         }
 
+        // ==================== BOOKING ACTIONS ====================
         async function contactCustomer(bookingId, customerEmail) {
             ModalDialog.confirm(`Send contact notification to customer (${customerEmail})?`, async () => {
                 try {
-                    const response = await fetch('api/admin_actions.php?action=contact-customer', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ booking_id: bookingId })
-                    });
-                    const result = await response.json();
-                    if (result.success) {
-                        showToast('Contact notification sent to customer!');
-                        setTimeout(() => location.reload(), 1000);
-                    } else {
-                        showToast(result.message || 'Error sending notification', 'danger');
+                    const b = bookings.find(x => x.ID === bookingId);
+                    await updateRequest(bookingId, { status: 'Contacted' });
+                    if (b) {
+                        await addNotification({
+                            recipientId: b.Customer_ID,
+                            title: 'Booking Update',
+                            message: `We have contacted you regarding your ${b.Service_Name} booking ${b.refNumber || ''}.`,
+                            requestId: bookingId
+                        });
+                        await sendCustomerEmail(b.Customer_Email, b.Customer_Name, `Your booking ${b.refNumber || ''}`,
+                            `Hi ${b.Customer_Name}, we have contacted you regarding your ${b.Service_Name} booking on ${fmtDate(b.Date)}.`);
                     }
+                    showToast('Contact notification sent to customer!');
                 } catch (error) {
+                    console.error(error);
                     showToast('Error contacting customer', 'danger');
                 }
             }, { title: 'Send Contact Notification', type: 'info' });
         }
 
         function downloadQuotePDF(bookingId) {
-            window.open('api/generate_quote_pdf.php?id=' + bookingId, '_blank');
+            const b = bookings.find(x => x.ID === bookingId);
+            if (b) downloadQuotePdf(b);
         }
 
         function viewQuoteDetails(id, breakdown, validityDays, notes, amount) {
             document.getElementById('viewQuoteBreakdown').textContent = breakdown || 'No breakdown provided';
             document.getElementById('viewQuoteValidity').textContent = validityDays ? validityDays + ' days' : '7 days';
             document.getElementById('viewQuoteNotes').textContent = notes || 'No notes';
-            document.getElementById('viewQuoteAmount').textContent = 'R ' + parseFloat(amount || 0).toFixed(2);
+            document.getElementById('viewQuoteAmount').textContent = fmtMoney(amount);
             openModal('viewQuoteModal');
         }
 
+        function viewQuoteDetailsById(id) {
+            const b = bookings.find(x => x.ID === id);
+            if (!b) return;
+            viewQuoteDetails(id, b.quote_breakdown, b.quote_validity_days, b.quote_notes, b.Quoted_Amount);
+        }
+
         async function quickAction(id, action) {
-            const endpoints = {
-                'contact': 'mark-contacted',
-                'in_progress': 'move-in-progress'
-            };
+            if (action === 'contact') {
+                const b = bookings.find(x => x.ID === id);
+                if (b) contactCustomer(id, b.Customer_Email);
+                return;
+            }
+            if (action === 'in_progress') {
+                await setRequestStatus(id, 'In Progress', 'Your booking is now in progress.');
+            }
+        }
+
+        async function setRequestStatus(id, fsStatus, customerMessage) {
             try {
-                const response = await fetch(`api/bookings.php?path=${endpoints[action]}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id })
-                });
-                const result = await response.json();
-                if (result.success) { showToast(result.message); setTimeout(() => location.reload(), 1000); }
-                else { showToast(result.message, 'danger'); }
-            } catch (error) { showToast('Error performing action', 'danger'); }
+                await updateRequest(id, { status: fsStatus });
+                const b = bookings.find(x => x.ID === id);
+                if (b && customerMessage) {
+                    await addNotification({
+                        recipientId: b.Customer_ID,
+                        title: 'Booking Update',
+                        message: `${customerMessage} (${b.refNumber || b.Service_Name})`,
+                        requestId: id
+                    });
+                }
+                showToast(`Booking updated to ${fsStatus}`);
+            } catch (error) {
+                console.error(error);
+                showToast('Error updating status', 'danger');
+            }
         }
 
         async function updateStatus(id, status) {
-            try {
-                const response = await fetch(`api/bookings.php?id=${id}&path=status`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status })
-                });
-                const result = await response.json();
-                if (result.success) { showToast(result.message); setTimeout(() => location.reload(), 1000); }
-                else { showToast(result.message, 'danger'); }
-            } catch (error) { showToast('Error updating status', 'danger'); }
+            const fsStatus = LEGACY_TO_FS[status] || status;
+            await setRequestStatus(id, fsStatus, fsStatus === 'Completed' ? 'Your booking has been completed. Thank you!' : `Your booking status is now ${fsStatus}.`);
         }
 
         function openQuoteModal(id, currentAmount) {
@@ -2183,29 +1663,21 @@ if (!in_array($activeSection, $validSections)) {
             openModal('quoteModal');
         }
 
-        document.getElementById('quoteForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const data = {
-                id: document.getElementById('quoteBookingId').value,
-                quoted_amount: document.getElementById('quotedAmount').value,
-                quote_breakdown: document.getElementById('quoteBreakdown').value,
-                quote_validity_days: document.getElementById('quoteValidity').value,
-                quote_notes: document.getElementById('quoteNotes').value
-            };
-            try {
-                const response = await fetch('api/bookings.php?path=provide-quotation', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                const result = await response.json();
-                if (result.success) { showToast(result.message); closeModal('quoteModal'); setTimeout(() => location.reload(), 1000); }
-                else { showToast(result.message, 'danger'); }
-            } catch (error) { showToast('Error providing quotation', 'danger'); }
-        });
+        function openAssignModal(id) {
+            const available = employees.filter(e => e.Is_Available);
+            const sel = document.getElementById('assignEmployeeId');
+            if (!available.length) {
+                showToast('No available employees — add or activate one on the Employees tab first.', 'warning');
+                return;
+            }
+            sel.innerHTML = available.map(e => `<option value="${e.ID}">${esc(e.Full_Name)} (${esc(e.Email)})</option>`).join('');
+            document.getElementById('assignBookingId').value = id;
+            openModal('assignModal');
+        }
 
         function exportBookings() {
             const date = new Date().toISOString().split('T')[0];
+            const list = getFilteredBookings();
             let html = `
                 <html>
                 <head>
@@ -2232,7 +1704,7 @@ if (!in_array($activeSection, $validSections)) {
                     <p>Generated: ${new Date().toLocaleString()}</p>
                     <table>
                         <tr>
-                            <th>ID</th>
+                            <th>Ref</th>
                             <th>Service</th>
                             <th>Customer</th>
                             <th>Email</th>
@@ -2245,49 +1717,309 @@ if (!in_array($activeSection, $validSections)) {
                             <th>Amount</th>
                         </tr>
             `;
-            
-            bookings.forEach(b => {
+            list.forEach(b => {
                 html += `
                     <tr>
-                        <td>${b.ID}</td>
-                        <td>${b.Service_Name || ''}</td>
-                        <td>${b.Customer_Name || ''}</td>
-                        <td>${b.Customer_Email || ''}</td>
-                        <td>${b.Customer_Phone || ''}</td>
-                        <td>${b.Date || ''}</td>
-                        <td>${b.Time || ''}</td>
-                        <td><span class="status status-${b.Status}">${b.Status || ''}</span></td>
-                        <td>${b.Address || ''}</td>
-                        <td>${b.Special_Instructions || ''}</td>
-                        <td>${b.Quoted_Amount ? 'R ' + parseFloat(b.Quoted_Amount).toFixed(2) : ''}</td>
+                        <td>${esc(b.refNumber || b.ID)}</td>
+                        <td>${esc(b.Service_Name || '')}</td>
+                        <td>${esc(b.Customer_Name || '')}</td>
+                        <td>${esc(b.Customer_Email || '')}</td>
+                        <td>${esc(b.Customer_Phone || '')}</td>
+                        <td>${esc(b.Date || '')}</td>
+                        <td>${esc(b.Time || '')}</td>
+                        <td><span class="status status-${b.Status}">${statusLabels[b.Status] || b.Status}</span></td>
+                        <td>${esc(b.Address || '')}</td>
+                        <td>${esc(b.Special_Instructions || '')}</td>
+                        <td>${b.Quoted_Amount ? fmtMoney(b.Quoted_Amount) : ''}</td>
                     </tr>
                 `;
             });
-            
-            html += `
-                    </table>
-                </body>
-                </html>
-            `;
-            
+            html += `</table></body></html>`;
             const printWindow = window.open('', '_blank');
             printWindow.document.write(html);
             printWindow.document.close();
             printWindow.print();
         }
 
-        // ========== SERVICES FUNCTIONS ==========
-        document.getElementById('addServiceForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            try {
-                const response = await fetch('api/services.php', { method: 'POST', body: formData });
-                const result = await response.json();
-                if (result.success) { showToast('Service created successfully!'); setTimeout(() => location.reload(), 1000); }
-                else { showToast(result.message, 'danger'); }
-            } catch (error) { showToast('Error creating service', 'danger'); }
-        });
+        // ==================== BOOKING DETAILS MODAL ====================
+        function viewBooking(id) {
+            const booking = bookings.find(b => b.ID == id);
+            if (!booking) return;
 
+            const status = booking.Status;
+            const canQuote = ['requested', 'contacted', 'in_progress'].includes(status);
+            const canContact = status === 'requested';
+            const canAssign = ['requested', 'contacted', 'confirmed'].includes(status);
+            const hasQuote = booking.Quoted_Amount && booking.Quoted_Amount > 0;
+
+            const badgeClass = status === 'requested' ? 'badge-warning' : status === 'confirmed' ? 'badge-success' : status === 'cancelled' ? 'badge-danger' : 'badge-info';
+
+            const detailsHtml = `
+                <div class="booking-details-grid">
+                    <div style="background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
+                        <h4 style="margin-bottom: 1rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="bi bi-briefcase"></i> Service Information
+                        </h4>
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-tag" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Service</span>
+                                    <p style="margin: 0; font-weight: 500;">${esc(booking.Service_Name)}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-clock" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Duration</span>
+                                    <p style="margin: 0; font-weight: 500;">${booking.Service_Duration || 'N/A'} minutes</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-calendar-plus" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Booked</span>
+                                    <p style="margin: 0; font-weight: 500;">${getRelativeDate(booking.created_at)}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-calendar-check" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Scheduled</span>
+                                    <p style="margin: 0; font-weight: 500;">${new Date(booking.Date).toLocaleDateString()}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-clock-history" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Time</span>
+                                    <p style="margin: 0; font-weight: 500;">${fmtTime(booking.Time)}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-info-circle" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Status</span>
+                                    <p style="margin: 0;">
+                                        <span class="badge ${badgeClass}" style="text-transform: capitalize;">${statusLabels[status] || booking._status}</span>
+                                    </p>
+                                </div>
+                            </div>
+                            ${hasQuote ? `
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-cash" style="color: var(--success); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Quote</span>
+                                    <p style="margin: 0; font-weight: 500; color: var(--success);">${fmtMoney(booking.Quoted_Amount)}</p>
+                                </div>
+                            </div>` : ''}
+                            ${booking.employeeName ? `
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-person-badge" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Assigned To</span>
+                                    <p style="margin: 0; font-weight: 500;">${esc(booking.employeeName)}</p>
+                                </div>
+                            </div>` : ''}
+                        </div>
+                    </div>
+
+                    <div style="background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
+                        <h4 style="margin-bottom: 1rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="bi bi-person"></i> Customer Information
+                        </h4>
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-person-circle" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Name</span>
+                                    <p style="margin: 0; font-weight: 500;">${esc(booking.Customer_Name)}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-envelope" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Email</span>
+                                    <p style="margin: 0; font-weight: 500;">${esc(booking.Customer_Email)}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                <i class="bi bi-telephone" style="color: var(--primary-color); width: 20px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Phone</span>
+                                    <p style="margin: 0; font-weight: 500;">${esc(booking.Customer_Phone || 'N/A')}</p>
+                                </div>
+                            </div>
+                            <div style="display: flex; align-items: start; gap: 0.75rem;">
+                                <i class="bi bi-geo-alt" style="color: var(--primary-color); width: 20px; margin-top: 2px;"></i>
+                                <div>
+                                    <span style="color: var(--text-light); font-size: 0.85rem;">Address</span>
+                                    <p style="margin: 0; font-weight: 500;">${esc(booking.Address)}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                ${booking.Special_Instructions ? `
+                <div style="margin-top: 1.5rem; background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
+                    <h4 style="margin-bottom: 0.75rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="bi bi-chat-text"></i> Special Instructions
+                    </h4>
+                    <p style="margin: 0; padding: 1rem; background: white; border-radius: 8px; border-left: 4px solid var(--primary-color);">${esc(booking.Special_Instructions)}</p>
+                </div>` : ''}
+
+                ${booking.Property_Type ? `
+                <div style="margin-top: 1.5rem; background: var(--secondary-color); padding: 1.5rem; border-radius: var(--border-radius);">
+                    <h4 style="margin-bottom: 1rem; color: var(--text-light); display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="bi bi-house"></i> Property Details
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <i class="bi bi-building" style="color: var(--primary-color); width: 20px;"></i>
+                            <div>
+                                <span style="color: var(--text-light); font-size: 0.85rem;">Type</span>
+                                <p style="margin: 0; font-weight: 500;">${esc(booking.Property_Type)}</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <i class="bi bi-aspect-ratio" style="color: var(--primary-color); width: 20px;"></i>
+                            <div>
+                                <span style="color: var(--text-light); font-size: 0.85rem;">Size</span>
+                                <p style="margin: 0; font-weight: 500;">${esc(booking.Property_Size || 'N/A')}</p>
+                            </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <i class="bi bi-arrow-repeat" style="color: var(--primary-color); width: 20px;"></i>
+                            <div>
+                                <span style="color: var(--text-light); font-size: 0.85rem;">Frequency</span>
+                                <p style="margin: 0; font-weight: 500;">${esc(booking.Cleaning_Frequency || 'N/A')}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>` : ''}
+            `;
+
+            let actionsHtml = '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">';
+            if (canContact) {
+                actionsHtml += `<button type="button" class="btn btn-primary btn-sm" onclick="contactCustomer('${booking.ID}', '${booking.Customer_Email}')"><i class="bi bi-telephone"></i> Contact Customer</button>`;
+            }
+            if (canQuote) {
+                actionsHtml += `<button type="button" class="btn btn-success btn-sm" onclick="closeModal('bookingModal'); openQuoteModal('${booking.ID}', ${booking.Quoted_Amount || 'null'})"><i class="bi bi-cash"></i> ${hasQuote ? 'Update Quote' : 'Provide Quote'}</button>`;
+            }
+            if (canAssign) {
+                actionsHtml += `<button type="button" class="btn btn-info btn-sm" onclick="closeModal('bookingModal'); openAssignModal('${booking.ID}')"><i class="bi bi-person-badge"></i> Assign Employee</button>`;
+            }
+            if (hasQuote) {
+                actionsHtml += `<button type="button" class="btn btn-info btn-sm" onclick="downloadQuotePDF('${booking.ID}')"><i class="bi bi-file-pdf"></i> Download PDF</button>`;
+            }
+            actionsHtml += `<button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('bookingModal')">Close</button></div>`;
+
+            document.getElementById('bookingDetails').innerHTML = detailsHtml;
+            document.getElementById('bookingActions').innerHTML = actionsHtml;
+            openModal('bookingModal');
+        }
+
+        // ==================== EXPIRY SWEEP (replaces expireQuotes/expirePastBookings) ====================
+        async function runExpirySweep() {
+            const now = new Date();
+            const todayStr = now.toISOString().slice(0, 10);
+            for (const b of bookings) {
+                if (expiryHandled.has(b.ID)) continue;
+                // Quote expiry: Quoted + quoteSentDate + validity days passed
+                if (b._status === 'Quoted' && b.quoteSentDate) {
+                    const sent = new Date(b.quoteSentDate);
+                    const valid = Number(b.quote_validity_days) || 7;
+                    const expiry = new Date(sent.getTime() + valid * 86400000);
+                    if (expiry < now) {
+                        expiryHandled.add(b.ID);
+                        try {
+                            await updateRequest(b.ID, { status: 'Expired' });
+                            await addNotification({
+                                recipientId: b.Customer_ID,
+                                title: 'Quote Expired',
+                                message: `Your quotation for ${b.Service_Name} (${b.refNumber || ''}) has expired.`,
+                                requestId: b.ID
+                            });
+                        } catch (e) { console.warn('Quote expiry failed', e); }
+                    }
+                }
+                // Past-booking expiry: requested/contacted bookings whose date has passed
+                if (['Pending', 'Contacted'].includes(b._status) && b.Date && b.Date < todayStr) {
+                    expiryHandled.add(b.ID);
+                    try {
+                        await updateRequest(b.ID, { status: 'Expired' });
+                        await addNotification({
+                            recipientId: b.Customer_ID,
+                            title: 'Booking Expired',
+                            message: `Your ${b.Service_Name} booking for ${fmtDate(b.Date)} has expired.`,
+                            requestId: b.ID
+                        });
+                    } catch (e) { console.warn('Booking expiry failed', e); }
+                }
+            }
+        }
+
+        // ==================== RENDER: SERVICES ====================
+        function renderServices() {
+            const available = services.filter(s => s.Is_Available).length;
+            document.getElementById('statServicesTotal').textContent = services.length;
+            document.getElementById('statServicesAvailable').textContent = available;
+            document.getElementById('statServicesUnavailable').textContent = services.length - available;
+            document.getElementById('statTotalServices').textContent = services.length;
+
+            const grid = document.getElementById('servicesGrid');
+            const empty = document.getElementById('servicesEmpty');
+            if (!services.length) {
+                grid.innerHTML = '';
+                empty.style.display = '';
+                return;
+            }
+            empty.style.display = 'none';
+            grid.innerHTML = services.map(s => `
+                <div class="item-card">
+                    <div class="item-image">
+                        ${s.Image_URL
+                            ? `<img src="${esc(s.Image_URL)}" alt="${esc(s.Name)}">`
+                            : `<div class="placeholder"><i class="bi bi-briefcase"></i></div>`}
+                        <span class="item-status ${s.Is_Available ? 'available' : 'unavailable'}">
+                            ${s.Is_Available ? 'Available' : 'Unavailable'}
+                        </span>
+                    </div>
+                    <div class="item-content">
+                        <h4>${esc(s.Name)}</h4>
+                        <p>${esc(s.Description || 'No description')}</p>
+                        <div class="item-meta">
+                            <span class="badge" style="background:var(--info-light);color:var(--info);padding:0.25rem 0.75rem;border-radius:20px;font-size:0.75rem;font-weight:600;">
+                                ${esc(s.Category || 'Uncategorized')}
+                            </span>
+                            <span class="item-duration"><i class="bi bi-clock"></i> ${s.Duration} min</span>
+                        </div>
+                        <div class="item-actions">
+                            <button class="btn btn-sm btn-primary" onclick="editService('${s.ID}')">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                            <button class="btn btn-sm ${s.Is_Available ? 'btn-secondary' : 'btn-success'}"
+                                    onclick="toggleServiceAvailability('${s.ID}', ${s.Is_Available ? 0 : 1})">
+                                <i class="bi bi-toggle-${s.Is_Available ? 'on' : 'off'}"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteService('${s.ID}')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Keep the booking service filter in sync
+            const sf = document.getElementById('serviceFilter');
+            const prev = sf.value;
+            sf.innerHTML = '<option value="">All Services</option>' +
+                services.map(s => `<option value="${s.ID}">${esc(s.Name)}</option>`).join('');
+            sf.value = prev;
+        }
+
+        // ==================== SERVICES ACTIONS ====================
         function editService(id) {
             const service = services.find(s => s.ID == id);
             if (!service) return;
@@ -2296,68 +2028,97 @@ if (!in_array($activeSection, $validSections)) {
             document.getElementById('editServiceDescription').value = service.Description || '';
             document.getElementById('editServiceDuration').value = service.Duration;
             document.getElementById('editServiceCategory').value = service.Category || '';
-            document.getElementById('editServiceIsAvailable').checked = service.Is_Available == 1;
+            document.getElementById('editServiceIsAvailable').checked = !!service.Is_Available;
             const previewDiv = document.getElementById('editServiceImagePreview');
             previewDiv.innerHTML = service.Image_URL
-                ? `<img src="${service.Image_URL}" style="max-height:120px;border-radius:8px;">`
+                ? `<img src="${esc(service.Image_URL)}" style="max-height:120px;border-radius:8px;">`
                 : '<p style="color:var(--text-light)">No image uploaded</p>';
             openModal('editServiceModal');
         }
 
-        document.getElementById('editServiceForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const id = formData.get('id');
-            formData.append('_method', 'PUT');
-            try {
-                const response = await fetch(`api/services.php?id=${id}`, {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                if (result.success) { showToast('Service updated successfully!'); setTimeout(() => location.reload(), 1000); }
-                else { showToast(result.message, 'danger'); }
-            } catch (error) { showToast('Error updating service', 'danger'); }
-        });
-
         async function toggleServiceAvailability(id, isAvailable) {
             ModalDialog.confirm(`Are you sure you want to ${isAvailable ? 'activate' : 'deactivate'} this service?`, async () => {
                 try {
-                    const response = await fetch('api/services.php?path=toggle-availability', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id, is_available: isAvailable })
-                    });
-                    const result = await response.json();
-                    if (result.success) { showToast(`Service ${isAvailable ? 'activated' : 'deactivated'} successfully!`); setTimeout(() => location.reload(), 1000); }
-                    else { showToast(result.message, 'danger'); }
-                } catch (error) { showToast('Error toggling availability', 'danger'); }
+                    await setServiceAvailability(id, isAvailable);
+                    showToast(`Service ${isAvailable ? 'activated' : 'deactivated'} successfully!`);
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error toggling availability', 'danger');
+                }
             }, { title: 'Confirm Action', type: 'warning' });
         }
 
         async function deleteService(id) {
             ModalDialog.confirm('Are you sure you want to delete this service? This action cannot be undone.', async () => {
                 try {
-                    const response = await fetch(`api/services.php?id=${id}`, { method: 'DELETE' });
-                    const result = await response.json();
-                    if (result.success) { showToast('Service deleted successfully!'); setTimeout(() => location.reload(), 1000); }
-                    else { showToast(result.message, 'danger'); }
-                } catch (error) { showToast('Error deleting service', 'danger'); }
+                    await deleteServiceDoc(id);
+                    showToast('Service deleted successfully!');
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error deleting service', 'danger');
+                }
             }, { title: 'Delete Service', type: 'danger' });
         }
 
-        // ========== PRODUCTS FUNCTIONS ==========
-        document.getElementById('addProductForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            try {
-                const response = await fetch('api/products.php', { method: 'POST', body: formData });
-                const result = await response.json();
-                if (result.success) { showToast('Product created successfully!'); setTimeout(() => location.reload(), 1000); }
-                else { showToast(result.message, 'danger'); }
-            } catch (error) { showToast('Error creating product', 'danger'); }
-        });
+        // ==================== RENDER: PRODUCTS ====================
+        function renderProducts() {
+            const available = products.filter(p => p.Is_Available).length;
+            const lowStock = products.filter(p => p.Stock_Quantity <= 10 && p.Stock_Quantity > 0).length;
+            const categories = new Set(products.map(p => p.Category)).size;
+            document.getElementById('statProductsTotal').textContent = products.length;
+            document.getElementById('statProductsAvailable').textContent = available;
+            document.getElementById('statProductsLowStock').textContent = lowStock;
+            document.getElementById('statProductsCategories').textContent = categories;
+            document.getElementById('statTotalProducts').textContent = products.length;
 
+            const grid = document.getElementById('productsGrid');
+            const empty = document.getElementById('productsEmpty');
+            if (!products.length) {
+                grid.innerHTML = '';
+                empty.style.display = '';
+                return;
+            }
+            empty.style.display = 'none';
+            grid.innerHTML = products.map(p => {
+                const isLowStock = p.Stock_Quantity <= 10 && p.Stock_Quantity > 0;
+                const isOutOfStock = p.Stock_Quantity == 0;
+                return `
+                <div class="item-card" ${isLowStock ? 'style="border:2px solid var(--warning);"' : ''}>
+                    <div class="item-image">
+                        ${p.Image_URL
+                            ? `<img src="${esc(p.Image_URL)}" alt="${esc(p.Name)}">`
+                            : `<div class="placeholder"><i class="bi bi-box-seam"></i></div>`}
+                        <span class="item-status ${(p.Is_Available && !isOutOfStock) ? 'available' : 'unavailable'}">
+                            ${(p.Is_Available && !isOutOfStock) ? 'Available' : 'Unavailable'}
+                        </span>
+                    </div>
+                    <div class="item-content">
+                        <h4>${esc(p.Name)}</h4>
+                        <p>${esc(p.Description || 'No description')}</p>
+                        <div class="item-meta">
+                            <span class="item-price">${fmtMoney(p.Price)}</span>
+                            <span class="item-stock" style="color:${isLowStock ? 'var(--warning)' : (isOutOfStock ? 'var(--danger)' : 'var(--text-light)')};font-weight:600;">
+                                Stock: ${p.Stock_Quantity}
+                            </span>
+                        </div>
+                        <div class="item-actions">
+                            <button class="btn btn-sm btn-primary" onclick="editProduct('${p.ID}')">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                            <button class="btn btn-sm ${p.Is_Available ? 'btn-secondary' : 'btn-success'}"
+                                    onclick="toggleProductAvailability('${p.ID}', ${p.Is_Available ? 0 : 1})">
+                                <i class="bi bi-toggle-${p.Is_Available ? 'on' : 'off'}"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteProduct('${p.ID}')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        // ==================== PRODUCTS ACTIONS ====================
         function editProduct(id) {
             const product = products.find(p => p.ID == id);
             if (!product) return;
@@ -2367,108 +2128,124 @@ if (!in_array($activeSection, $validSections)) {
             document.getElementById('editProductPrice').value = product.Price;
             document.getElementById('editProductStock').value = product.Stock_Quantity;
             document.getElementById('editProductCategory').value = product.Category || '';
-            document.getElementById('editProductIsAvailable').checked = product.Is_Available == 1;
+            document.getElementById('editProductIsAvailable').checked = !!product.Is_Available;
             const previewDiv = document.getElementById('editProductImagePreview');
             previewDiv.innerHTML = product.Image_URL
-                ? `<img src="${product.Image_URL}" style="max-height:120px;border-radius:8px;">`
+                ? `<img src="${esc(product.Image_URL)}" style="max-height:120px;border-radius:8px;">`
                 : '<p style="color:var(--text-light)">No image uploaded</p>';
             openModal('editProductModal');
         }
 
-        document.getElementById('editProductForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            const id = formData.get('id');
-            formData.append('_method', 'PUT');
-            try {
-                const response = await fetch(`api/products.php?id=${id}`, {
-                    method: 'POST',
-                    body: formData
-                });
-                const result = await response.json();
-                if (result.success) { showToast('Product updated successfully!'); setTimeout(() => location.reload(), 1000); }
-                else { showToast(result.message, 'danger'); }
-            } catch (error) { showToast('Error updating product', 'danger'); }
-        });
-
         async function toggleProductAvailability(id, isAvailable) {
             ModalDialog.confirm(`Are you sure you want to ${isAvailable ? 'activate' : 'deactivate'} this product?`, async () => {
                 try {
-                    const response = await fetch('api/products.php?path=toggle-availability', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id, is_available: isAvailable })
-                    });
-                    const result = await response.json();
-                    if (result.success) { showToast(result.message); setTimeout(() => location.reload(), 1000); }
-                    else { showToast(result.message, 'danger'); }
-                } catch (error) { showToast('Error toggling availability', 'danger'); }
+                    await setProductAvailability(id, isAvailable);
+                    showToast(`Product ${isAvailable ? 'activated' : 'deactivated'} successfully!`);
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error toggling availability', 'danger');
+                }
             }, { title: 'Confirm Action', type: 'warning' });
         }
 
         async function deleteProduct(id) {
             ModalDialog.confirm('Are you sure you want to delete this product? This action cannot be undone.', async () => {
                 try {
-                    const response = await fetch(`api/products.php?id=${id}`, { method: 'DELETE' });
-                    const result = await response.json();
-                    if (result.success) { showToast('Product deleted successfully!'); setTimeout(() => location.reload(), 1000); }
-                    else { showToast(result.message, 'danger'); }
-                } catch (error) { showToast('Error deleting product', 'danger'); }
+                    await deleteProductDoc(id);
+                    showToast('Product deleted successfully!');
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error deleting product', 'danger');
+                }
             }, { title: 'Delete Product', type: 'danger' });
         }
 
-        // ========== CUSTOMERS FUNCTIONS (Display Only) ==========
-        // Customer search
-        document.getElementById('customerSearch')?.addEventListener('input', function() {
-            const searchTerm = this.value.toLowerCase();
-            const rows = document.querySelectorAll('#section-customers table tbody tr');
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(searchTerm) ? '' : 'none';
-            });
-        });
+        // ==================== RENDER: CUSTOMERS ====================
+        function renderCustomers() {
+            const cutoff = Date.now() - 30 * 86400000;
+            const newCount = customers.filter(c => c.createdAt && new Date(c.createdAt).getTime() > cutoff).length;
+            document.getElementById('statCustomersTotal').textContent = customers.length;
+            document.getElementById('statCustomersNew').textContent = newCount;
 
-        // ========== PASSWORD CHANGE ==========
-        document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const currentPassword = document.getElementById('currentPassword').value;
-            const newPassword = document.getElementById('newPassword').value;
-            const confirmPassword = document.getElementById('confirmPassword').value;
-            
-            if (newPassword !== confirmPassword) {
-                showToast('Passwords do not match', 'danger');
+            const table = document.getElementById('customersTable');
+            const empty = document.getElementById('customersEmpty');
+            if (!customers.length) {
+                table.style.display = 'none';
+                empty.style.display = '';
                 return;
             }
-            
-            if (newPassword.length < 8) {
-                showToast('Password must be at least 8 characters long', 'danger');
+            empty.style.display = 'none';
+            table.style.display = '';
+            document.getElementById('customersBody').innerHTML = customers.map(c => `
+                <tr>
+                    <td>${esc(c.Full_Name)}</td>
+                    <td>${esc(c.Email)}</td>
+                    <td>${esc(c.Phone || 'N/A')}</td>
+                    <td>${esc(c.Address || 'N/A')}</td>
+                    <td>${fmtDate(c.createdAt)}</td>
+                </tr>
+            `).join('');
+        }
+
+        // ==================== RENDER: EMPLOYEES ====================
+        function renderEmployees() {
+            const available = employees.filter(e => e.Is_Available).length;
+            document.getElementById('statEmployeesTotal').textContent = employees.length;
+            document.getElementById('statEmployeesAvailable').textContent = available;
+
+            const table = document.getElementById('employeesTable');
+            const empty = document.getElementById('employeesEmpty');
+            if (!employees.length) {
+                table.style.display = 'none';
+                empty.style.display = '';
                 return;
             }
-            
-            try {
-                const response = await fetch('api/admin_profile.php?action=change_password', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        current_password: currentPassword,
-                        new_password: newPassword
-                    })
-                });
-                const result = await response.json();
-                if (result.success) { 
-                    showToast('Password changed successfully!'); 
-                    closeModal('changePasswordModal'); 
-                    e.target.reset();
-                } else { 
-                    showToast(result.message, 'danger'); 
+            empty.style.display = 'none';
+            table.style.display = '';
+            document.getElementById('employeesBody').innerHTML = employees.map(e => `
+                <tr>
+                    <td>${esc(e.Full_Name)}</td>
+                    <td>${esc(e.Email)}</td>
+                    <td>${esc(e.Phone || 'N/A')}</td>
+                    <td><span class="badge ${e.Is_Available ? 'badge-success' : 'badge-secondary'}">${e.Is_Available ? 'Available' : 'Unavailable'}</span></td>
+                    <td>${fmtDate(e.createdAt)}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn btn-sm ${e.Is_Available ? 'btn-secondary' : 'btn-success'}"
+                                    onclick="toggleEmployeeAvailability('${e.ID}', ${e.Is_Available ? 0 : 1})">
+                                <i class="bi bi-toggle-${e.Is_Available ? 'on' : 'off'}"></i> ${e.Is_Available ? 'Deactivate' : 'Activate'}
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function toggleEmployeeAvailability(id, isAvailable) {
+            ModalDialog.confirm(`Are you sure you want to ${isAvailable ? 'activate' : 'deactivate'} this employee?`, async () => {
+                try {
+                    await setEmployeeAvailability(id, isAvailable);
+                    showToast(`Employee ${isAvailable ? 'activated' : 'deactivated'} successfully!`);
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error updating employee', 'danger');
                 }
-            } catch (error) { 
-                showToast('Error changing password', 'danger'); 
-            }
-        });
+            }, { title: 'Confirm Action', type: 'warning' });
+        }
 
-        // ========== ADMIN FUNCTIONS ==========
-        // Generate random password
+        // ==================== SECONDARY-APP USER CREATION ====================
+        // Creates a Firebase Auth account without signing the admin out:
+        // a second app instance holds the new user's session, which we then
+        // sign out and discard.
+        async function createAuthUser(email, password) {
+            const secondary = initializeApp(window.CONFIG.FIREBASE, 'secondary-' + Date.now());
+            const secondaryAuth = getAuth(secondary);
+            const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+            const uid = cred.user.uid;
+            await fbSignOut(secondaryAuth);
+            return uid;
+        }
+
         function generateRandomPassword() {
             const length = 12;
             const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
@@ -2479,128 +2256,151 @@ if (!in_array($activeSection, $validSections)) {
             return password;
         }
 
-        // Generate password button handler
-        function generateAdminPassword() {
-            // Validate all fields first
-            const name = document.getElementById('adminName').value.trim();
-            const email = document.getElementById('adminEmail').value.trim();
-            const phone = document.getElementById('adminPhone').value.trim();
-            const role = document.getElementById('adminRole').value;
+        function splitName(fullName) {
+            const parts = (fullName || '').trim().split(/\s+/);
+            return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') };
+        }
 
-            if (!name || !email || !phone || !role) {
+        // ==================== EMPLOYEE MODAL ====================
+        function openEmployeeModal() {
+            document.getElementById('employeeForm').reset();
+            document.getElementById('employeeGeneratedPassword').value = '';
+            document.getElementById('employeeDisplayPassword').value = '';
+            document.getElementById('employeePasswordDisplaySection').style.display = 'none';
+            document.getElementById('generateEmployeePasswordBtn').style.display = 'inline-flex';
+            document.getElementById('saveEmployeeBtn').style.display = 'none';
+            document.getElementById('employeeCopyFeedback').style.display = 'none';
+            openModal('employeeModal');
+        }
+
+        function generateEmployeePassword() {
+            const name = document.getElementById('employeeName').value.trim();
+            const email = document.getElementById('employeeEmail').value.trim();
+            const phone = document.getElementById('employeePhone').value.trim();
+            if (!name || !email || !phone) {
                 showToast('Please fill in all fields before generating password', 'danger');
                 return;
             }
-
-            // Generate password
             const password = generateRandomPassword();
-            document.getElementById('generatedPassword').value = password;
-            document.getElementById('displayGeneratedPassword').value = password;
-
-            // Show password display section
-            document.getElementById('passwordDisplaySection').style.display = 'block';
-
-            // Switch buttons
-            document.getElementById('generatePasswordBtn').style.display = 'none';
-            document.getElementById('saveAdminBtn').style.display = 'inline-flex';
-
-            // Auto copy to clipboard
-            copyGeneratedPassword();
+            document.getElementById('employeeGeneratedPassword').value = password;
+            document.getElementById('employeeDisplayPassword').value = password;
+            document.getElementById('employeePasswordDisplaySection').style.display = 'block';
+            document.getElementById('generateEmployeePasswordBtn').style.display = 'none';
+            document.getElementById('saveEmployeeBtn').style.display = 'inline-flex';
+            copyEmployeePassword();
         }
 
-        // Copy generated password to clipboard
-        function copyGeneratedPassword() {
-            const passwordInput = document.getElementById('displayGeneratedPassword');
+        function copyEmployeePassword() {
+            const passwordInput = document.getElementById('employeeDisplayPassword');
             passwordInput.select();
-            passwordInput.setSelectionRange(0, 99999); // For mobile
+            passwordInput.setSelectionRange(0, 99999);
             navigator.clipboard.writeText(passwordInput.value).then(() => {
-                document.getElementById('copyFeedback').style.display = 'block';
-                setTimeout(() => {
-                    document.getElementById('copyFeedback').style.display = 'none';
-                }, 3000);
+                document.getElementById('employeeCopyFeedback').style.display = 'block';
+                setTimeout(() => { document.getElementById('employeeCopyFeedback').style.display = 'none'; }, 3000);
             }).catch(() => {
                 showToast('Failed to copy password. Please copy manually.', 'warning');
             });
         }
 
-        // Admin form submit handler
-        document.getElementById('adminForm')?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const adminId = document.getElementById('adminId').value;
-            const generatedPassword = document.getElementById('generatedPassword').value;
+        // ==================== RENDER: ADMINS ====================
+        function renderAdmins() {
+            if (!isMainAdmin) return;
+            const main = admins.filter(a => a.Role === 'main_admin').length;
+            const sub = admins.filter(a => a.Role === 'sub_admin').length;
+            document.getElementById('statAdminsTotal').textContent = admins.length;
+            document.getElementById('statAdminsMain').textContent = main;
+            document.getElementById('statAdminsSub').textContent = sub;
 
-            const data = {
-                Full_Name: document.getElementById('adminName').value,
-                Email: document.getElementById('adminEmail').value,
-                Phone: document.getElementById('adminPhone').value,
-                Role: document.getElementById('adminRole').value,
-                Password: generatedPassword || undefined
-            };
-
-            try {
-                const method = adminId ? 'PUT' : 'POST';
-                const url = adminId ? `api/admin_management.php?id=${adminId}` : 'api/admin_management.php';
-
-                const response = await fetch(url, {
-                    method: method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-
-                const result = await response.json();
-
-                if (result.success) {
-                    const pwdMsg = result.temp_password ? ` Temporary password: ${result.temp_password}` : '';
-                    showToast(result.message + pwdMsg);
-                    closeModal('adminModal');
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    showToast(result.message, 'danger');
-                }
-            } catch (error) {
-                showToast('Error saving admin', 'danger');
+            const table = document.getElementById('adminsTable');
+            const empty = document.getElementById('adminsEmpty');
+            if (!admins.length) {
+                table.style.display = 'none';
+                empty.style.display = '';
+                return;
             }
-        });
+            empty.style.display = 'none';
+            table.style.display = '';
+            document.getElementById('adminsBody').innerHTML = admins.map(a => `
+                <tr>
+                    <td>${esc(a.Full_Name)}</td>
+                    <td>${esc(a.Email)}</td>
+                    <td>${esc(a.Phone || 'N/A')}</td>
+                    <td>
+                        <span class="badge ${a.Role === 'main_admin' ? 'badge-primary' : 'badge-secondary'}">
+                            ${a.Role === 'main_admin' ? 'Main Admin' : 'Sub-Admin'}
+                        </span>
+                    </td>
+                    <td>${fmtDate(a.createdAt)}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn btn-sm btn-primary" onclick="editAdmin('${a.ID}')">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            ${a.ID !== currentAdmin.ID ? `
+                            <button class="btn btn-sm btn-danger" onclick="deleteAdmin('${a.ID}')">
+                                <i class="bi bi-trash"></i>
+                            </button>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
 
-        async function loadAdminData(adminId) {
-            try {
-                const response = await fetch(`api/admin_management.php?id=${adminId}`);
-                const result = await response.json();
-
-                if (result.success && result.admin) {
-                    const admin = result.admin;
-                    document.getElementById('adminId').value = admin.ID;
-                    document.getElementById('adminName').value = admin.Full_Name || '';
-                    document.getElementById('adminEmail').value = admin.Email;
-                    document.getElementById('adminPhone').value = admin.Phone || '';
-                    document.getElementById('adminRole').value = admin.Role;
-                    // Hide password generation for edit mode
-                    document.getElementById('passwordDisplaySection').style.display = 'none';
-                    document.getElementById('generatePasswordBtn').style.display = 'none';
-                    document.getElementById('saveAdminBtn').style.display = 'inline-flex';
-                    document.getElementById('saveAdminBtn').innerHTML = '<i class="bi bi-check-lg"></i> Update Admin';
-                } else {
-                    showToast('Error loading admin data', 'danger');
-                    closeModal('adminModal');
-                }
-            } catch (error) {
-                showToast('Error loading admin data', 'danger');
+        // ==================== ADMIN ACTIONS ====================
+        function generateAdminPassword() {
+            const name = document.getElementById('adminName').value.trim();
+            const email = document.getElementById('adminEmail').value.trim();
+            const phone = document.getElementById('adminPhone').value.trim();
+            const role = document.getElementById('adminRole').value;
+            if (!name || !email || !phone || !role) {
+                showToast('Please fill in all fields before generating password', 'danger');
+                return;
             }
+            const password = generateRandomPassword();
+            document.getElementById('generatedPassword').value = password;
+            document.getElementById('displayGeneratedPassword').value = password;
+            document.getElementById('passwordDisplaySection').style.display = 'block';
+            document.getElementById('generatePasswordBtn').style.display = 'none';
+            document.getElementById('saveAdminBtn').style.display = 'inline-flex';
+            copyGeneratedPassword();
+        }
+
+        function copyGeneratedPassword() {
+            const passwordInput = document.getElementById('displayGeneratedPassword');
+            passwordInput.select();
+            passwordInput.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(passwordInput.value).then(() => {
+                document.getElementById('copyFeedback').style.display = 'block';
+                setTimeout(() => { document.getElementById('copyFeedback').style.display = 'none'; }, 3000);
+            }).catch(() => {
+                showToast('Failed to copy password. Please copy manually.', 'warning');
+            });
         }
 
         function editAdmin(id) {
+            const admin = admins.find(a => a.ID == id);
+            if (!admin) return;
             document.getElementById('adminModalTitle').textContent = 'Edit Admin';
-            loadAdminData(id);
+            document.getElementById('adminId').value = admin.ID;
+            document.getElementById('adminName').value = admin.Full_Name || '';
+            document.getElementById('adminEmail').value = admin.Email;
+            document.getElementById('adminEmail').disabled = true;
+            document.getElementById('adminPhone').value = admin.Phone || '';
+            document.getElementById('adminRole').value = admin.Role;
+            document.getElementById('passwordDisplaySection').style.display = 'none';
+            document.getElementById('generatePasswordBtn').style.display = 'none';
+            document.getElementById('saveAdminBtn').style.display = 'inline-flex';
+            document.getElementById('saveAdminBtn').innerHTML = '<i class="bi bi-check-lg"></i> Update Admin';
             openModal('adminModal');
         }
 
         function openAdminModal() {
             document.getElementById('adminModalTitle').textContent = 'Add New Admin';
             document.getElementById('adminForm').reset();
+            document.getElementById('adminEmail').disabled = false;
             document.getElementById('adminId').value = '';
             document.getElementById('generatedPassword').value = '';
             document.getElementById('displayGeneratedPassword').value = '';
-            // Reset to initial state
             document.getElementById('passwordDisplaySection').style.display = 'none';
             document.getElementById('generatePasswordBtn').style.display = 'inline-flex';
             document.getElementById('saveAdminBtn').style.display = 'none';
@@ -2610,87 +2410,736 @@ if (!in_array($activeSection, $validSections)) {
         }
 
         async function deleteAdmin(id) {
-            ModalDialog.confirm('Are you sure you want to delete this admin? This action cannot be undone.', async () => {
+            ModalDialog.confirm('Are you sure you want to delete this admin? This removes their admin access (their login becomes a customer account).', async () => {
                 try {
-                    const response = await fetch(`api/admin_management.php?id=${id}`, { method: 'DELETE' });
-                    const result = await response.json();
-
-                    if (result.success) {
-                        showToast('Admin deleted successfully!');
-                        setTimeout(() => location.reload(), 1000);
-                    } else {
-                        showToast(result.message, 'danger');
-                    }
+                    await deleteAdminDoc(id);
+                    // Demote the matching users doc so staff rules no longer apply.
+                    await updateUserProfile(id, { role: 'customer' });
+                    showToast('Admin deleted successfully!');
                 } catch (error) {
+                    console.error(error);
                     showToast('Error deleting admin', 'danger');
                 }
             }, { title: 'Delete Admin', type: 'danger' });
         }
 
-        // Notification dropdown functionality
-        function toggleNotificationDropdown() {
-            const dropdown = document.getElementById('notificationDropdown');
-            dropdown.classList.toggle('active');
+        // ==================== RENDER: PROFILE ====================
+        function setProfileEditMode(on) {
+            profileEditMode = on;
+            const url = new URL(window.location);
+            if (on) url.searchParams.set('edit_profile', '1');
+            else url.searchParams.delete('edit_profile');
+            history.pushState({}, '', url);
+            renderProfile();
         }
 
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const notificationBell = document.querySelector('.notification-bell');
-            if (!notificationBell.contains(event.target)) {
-                document.getElementById('notificationDropdown').classList.remove('active');
-            }
-        });
+        function renderProfile() {
+            document.getElementById('editProfileBtn').style.display = profileEditMode ? 'none' : '';
+            document.getElementById('profileLastChanged').textContent =
+                currentAdmin?.updatedAt ? fmtDate(currentAdmin.updatedAt) : 'Unknown';
+            document.getElementById('profileAccountStatus').innerHTML = currentAdmin?.first_login
+                ? '<span style="color:var(--warning);">First login - password reset required</span>'
+                : '<span style="color:var(--success);">Active</span>';
 
-        // Mark individual notification as read
+            const body = document.getElementById('profileCardBody');
+            if (profileEditMode) {
+                body.innerHTML = `
+                    <form id="profileEditForm">
+                        <div class="form-group">
+                            <label>Full Name <span class="text-danger">*</span></label>
+                            <input type="text" name="full_name" class="form-input" value="${esc(currentAdmin?.Full_Name || '')}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" class="form-input" value="${esc(currentAdmin?.Email || '')}" disabled style="background:var(--secondary-color);">
+                            <small style="color:var(--text-light);">Email cannot be changed</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Phone</label>
+                            <input type="tel" name="phone" class="form-input" value="${esc(currentAdmin?.Phone || '')}" maxlength="10" placeholder="e.g., 0821234567">
+                            <small style="color:var(--text-light);">10 digits (e.g., 0821234567)</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Role</label>
+                            <input type="text" class="form-input" value="${currentAdmin?.Role === 'main_admin' ? 'Main Admin' : 'Sub-Admin'}" disabled style="background:var(--secondary-color);">
+                        </div>
+                        <div class="form-group">
+                            <label>Member Since</label>
+                            <input type="text" class="form-input" value="${fmtDateLong(currentAdmin?.createdAt)}" disabled style="background:var(--secondary-color);">
+                        </div>
+                        <div class="form-actions" style="margin-top:1.5rem;">
+                            <button type="button" class="btn btn-secondary" onclick="setProfileEditMode(false)">Cancel</button>
+                            <button type="submit" name="update_profile" class="btn btn-primary">
+                                <i class="bi bi-check-lg"></i> Save Changes
+                            </button>
+                        </div>
+                    </form>
+                `;
+                document.getElementById('profileEditForm').addEventListener('submit', saveProfile);
+            } else {
+                body.innerHTML = `
+                    <div class="profile-display">
+                        <div class="info-item">
+                            <label>Full Name</label>
+                            <p>${esc(currentAdmin?.Full_Name || 'N/A')}</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Email</label>
+                            <p>${esc(currentAdmin?.Email || 'N/A')}</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Phone</label>
+                            <p>${esc(currentAdmin?.Phone || 'Not set')}</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Role</label>
+                            <p><span class="badge ${currentAdmin?.Role === 'main_admin' ? 'badge-primary' : 'badge-secondary'}">${currentAdmin?.Role === 'main_admin' ? 'Main Admin' : 'Sub-Admin'}</span></p>
+                        </div>
+                        <div class="info-item">
+                            <label>Member Since</label>
+                            <p>${fmtDateLong(currentAdmin?.createdAt)}</p>
+                        </div>
+                        <div class="info-item">
+                            <label>Last Updated</label>
+                            <p>${fmtDateLong(currentAdmin?.updatedAt)}</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        async function saveProfile(e) {
+            e.preventDefault();
+            const fullName = e.target.full_name.value.trim();
+            const phone = e.target.phone.value.trim();
+            const alertBox = document.getElementById('profileAlert');
+
+            const showProfileMsg = (text, isError) => {
+                alertBox.style.display = '';
+                alertBox.innerHTML = `<div class="alert alert-${isError ? 'error' : 'success'}"><i class="bi bi-${isError ? 'exclamation' : 'check'}-circle"></i> ${esc(text)}</div>`;
+            };
+
+            if (fullName.length < 2) return showProfileMsg('Full name must be at least 2 characters.', true);
+            if (!/^[a-zA-Z\s\-']+$/.test(fullName)) return showProfileMsg("Full name can only contain letters, spaces, hyphens, and apostrophes.", true);
+            const cleanPhone = phone.replace(/\D/g, '');
+            if (!/^0[0-9]{9}$/.test(cleanPhone)) return showProfileMsg('Phone number must be exactly 10 digits starting with 0 (e.g., 0821234567).', true);
+
+            try {
+                await updateAdminDoc(currentAdmin.ID, { fullName, phone: cleanPhone });
+                const { firstName, lastName } = splitName(fullName);
+                await updateUserProfile(currentAdmin.ID, { firstName, lastName, phone: cleanPhone });
+                currentAdmin.Full_Name = fullName;
+                currentAdmin.Phone = cleanPhone;
+                document.getElementById('headerUserName').textContent = fullName;
+                showProfileMsg('Profile updated successfully!', false);
+                profileEditMode = false;
+                renderProfile();
+            } catch (error) {
+                console.error(error);
+                showProfileMsg('Error updating profile. Please try again.', true);
+            }
+        }
+
+        // ==================== NOTIFICATIONS ====================
+        function renderNotifications() {
+            const badge = document.getElementById('notificationBadge');
+            const unread = notifications.filter(n => !n.is_read).length;
+            if (unread > 0) {
+                badge.style.display = '';
+                badge.textContent = unread;
+            } else {
+                badge.style.display = 'none';
+            }
+
+            const content = document.getElementById('notificationDropdownContent');
+            if (!notifications.length) {
+                content.innerHTML = `<div class="no-notifications"><i class="bi bi-bell-slash"></i><p>No new notifications</p></div>`;
+                return;
+            }
+            content.innerHTML = notifications.map(n => `
+                <div class="notification-dropdown-item ${n.is_read ? '' : 'unread'}" data-id="${n.ID}">
+                    <div class="notif-content">
+                        <strong>${esc(n.title)}</strong>
+                        <p>${esc(n.message)}</p>
+                        <small>${fmtDateTime(n.created_at)}</small>
+                    </div>
+                    <button class="notif-close" onclick="markAdminNotificationRead('${n.ID}')">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function toggleNotificationDropdown() {
+            document.getElementById('notificationDropdown').classList.toggle('active');
+        }
+
         async function markAdminNotificationRead(notificationId) {
             try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_read', notification_id: notificationId })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
-                    if (notifItem) {
-                        notifItem.style.opacity = '0';
-                        setTimeout(() => notifItem.remove(), 300);
-                    }
-                    // Update badge count
-                    const badge = document.querySelector('.notification-badge');
-                    if (badge) {
-                        const currentCount = parseInt(badge.textContent);
-                        if (currentCount > 1) {
-                            badge.textContent = currentCount - 1;
-                        } else {
-                            badge.remove();
-                        }
-                    }
-                }
+                await markNotificationRead(notificationId);
             } catch (error) {
                 console.error('Error:', error);
             }
         }
 
-        // Mark all notifications as read
         async function markAllAdminNotificationsRead() {
             try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_all_read' })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const dropdownContent = document.querySelector('.notification-dropdown-content');
-                    dropdownContent.innerHTML = '<div class="no-notifications"><i class="bi bi-bell-slash"></i><p>No new notifications</p></div>';
-                    const badge = document.querySelector('.notification-badge');
-                    if (badge) badge.remove();
-                }
+                await markAllNotificationsRead(notifications.filter(n => !n.is_read).map(n => n.ID));
             } catch (error) {
                 console.error('Error:', error);
             }
         }
+
+        // ==================== FORM WIRING ====================
+        function wireForms() {
+            // Quote form → Firestore
+            document.getElementById('quoteForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const id = document.getElementById('quoteBookingId').value;
+                const data = {
+                    status: 'Quoted',
+                    quotedAmount: Number(document.getElementById('quotedAmount').value),
+                    quoteBreakdown: document.getElementById('quoteBreakdown').value,
+                    quoteValidityDays: Number(document.getElementById('quoteValidity').value) || 7,
+                    quoteNotes: document.getElementById('quoteNotes').value,
+                    quoteSentDate: new Date().toISOString()
+                };
+                try {
+                    await updateRequest(id, data);
+                    const b = bookings.find(x => x.ID === id);
+                    if (b) {
+                        await addNotification({
+                            recipientId: b.Customer_ID,
+                            title: 'Quotation Ready',
+                            message: `Your quotation for ${b.Service_Name} is ready: ${fmtMoney(data.quotedAmount)}.`,
+                            requestId: id
+                        });
+                    }
+                    showToast('Quotation provided successfully!');
+                    closeModal('quoteModal');
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error providing quotation', 'danger');
+                }
+            });
+
+            // Assign employee form
+            document.getElementById('assignForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const id = document.getElementById('assignBookingId').value;
+                const employeeId = document.getElementById('assignEmployeeId').value;
+                const emp = employees.find(x => x.ID === employeeId);
+                try {
+                    await updateRequest(id, {
+                        status: 'Approved',
+                        employeeId,
+                        employeeName: emp?.Full_Name || '',
+                        staffId: currentUser.uid
+                    });
+                    const b = bookings.find(x => x.ID === id);
+                    if (b) {
+                        await addNotification({
+                            recipientId: employeeId,
+                            title: 'New Job Assigned',
+                            message: `You have been assigned: ${b.Service_Name} on ${fmtDate(b.Date)} at ${fmtTime(b.Time)}.`,
+                            requestId: id
+                        });
+                        await addNotification({
+                            recipientId: b.Customer_ID,
+                            title: 'Employee Assigned',
+                            message: `${emp?.Full_Name || 'A team member'} has been assigned to your ${b.Service_Name} booking.`,
+                            requestId: id
+                        });
+                    }
+                    showToast(`Assigned to ${emp?.Full_Name || 'employee'} — job is now Approved.`);
+                    closeModal('assignModal');
+                } catch (error) {
+                    console.error(error);
+                    showToast('Error assigning employee', 'danger');
+                }
+            });
+
+            // Add service
+            document.getElementById('addServiceForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                try {
+                    const imageUrl = await fileToDataUrl(fd.get('image'));
+                    await createService({
+                        Name: fd.get('Name'),
+                        Description: fd.get('Description'),
+                        Duration: fd.get('Duration'),
+                        Category: fd.get('Category'),
+                        Is_Available: fd.get('Is_Available') === '1',
+                        Image_URL: imageUrl
+                    });
+                    showToast('Service created successfully!');
+                    closeModal('addServiceModal');
+                    e.target.reset();
+                } catch (error) {
+                    console.error(error);
+                    showToast(error.message || 'Error creating service', 'danger');
+                }
+            });
+
+            // Edit service
+            document.getElementById('editServiceForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const id = fd.get('id');
+                try {
+                    const file = fd.get('image');
+                    const existing = services.find(s => s.ID === id);
+                    const imageUrl = file && file.size ? await fileToDataUrl(file) : (existing?.Image_URL || '');
+                    await updateService(id, {
+                        Name: fd.get('Name'),
+                        Description: fd.get('Description'),
+                        Duration: fd.get('Duration'),
+                        Category: fd.get('Category'),
+                        Is_Available: fd.get('Is_Available') === '1',
+                        Image_URL: imageUrl
+                    });
+                    showToast('Service updated successfully!');
+                    closeModal('editServiceModal');
+                } catch (error) {
+                    console.error(error);
+                    showToast(error.message || 'Error updating service', 'danger');
+                }
+            });
+
+            // Add product
+            document.getElementById('addProductForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                try {
+                    const imageUrl = await fileToDataUrl(fd.get('image'));
+                    await createProduct({
+                        Name: fd.get('Name'),
+                        Description: fd.get('Description'),
+                        Price: fd.get('Price'),
+                        Stock_Quantity: fd.get('Stock_Quantity'),
+                        Category: fd.get('Category'),
+                        Is_Available: fd.get('Is_Available') === '1',
+                        Image_URL: imageUrl
+                    });
+                    showToast('Product created successfully!');
+                    closeModal('addProductModal');
+                    e.target.reset();
+                } catch (error) {
+                    console.error(error);
+                    showToast(error.message || 'Error creating product', 'danger');
+                }
+            });
+
+            // Edit product
+            document.getElementById('editProductForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const id = fd.get('id');
+                try {
+                    const file = fd.get('image');
+                    const existing = products.find(p => p.ID === id);
+                    const imageUrl = file && file.size ? await fileToDataUrl(file) : (existing?.Image_URL || '');
+                    await updateProduct(id, {
+                        Name: fd.get('Name'),
+                        Description: fd.get('Description'),
+                        Price: fd.get('Price'),
+                        Stock_Quantity: fd.get('Stock_Quantity'),
+                        Category: fd.get('Category'),
+                        Is_Available: fd.get('Is_Available') === '1',
+                        Image_URL: imageUrl
+                    });
+                    showToast('Product updated successfully!');
+                    closeModal('editProductModal');
+                } catch (error) {
+                    console.error(error);
+                    showToast(error.message || 'Error updating product', 'danger');
+                }
+            });
+
+            // Change password → Firebase Auth
+            document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const currentPassword = document.getElementById('currentPassword').value;
+                const newPassword = document.getElementById('newPasswordChange').value;
+                const confirmPassword = document.getElementById('confirmPasswordChange').value;
+                if (newPassword !== confirmPassword) {
+                    showToast('Passwords do not match', 'danger');
+                    return;
+                }
+                if (newPassword.length < 8) {
+                    showToast('Password must be at least 8 characters long', 'danger');
+                    return;
+                }
+                try {
+                    await pmaChangePassword(currentPassword, newPassword);
+                    showToast('Password changed successfully!');
+                    closeModal('changePasswordModal');
+                    e.target.reset();
+                } catch (error) {
+                    showToast(authErrorMessage(error), 'danger');
+                }
+            });
+
+            // Admin add/edit
+            document.getElementById('adminForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const adminId = document.getElementById('adminId').value;
+                const data = {
+                    Full_Name: document.getElementById('adminName').value.trim(),
+                    Email: document.getElementById('adminEmail').value.trim(),
+                    Phone: document.getElementById('adminPhone').value.trim(),
+                    Role: document.getElementById('adminRole').value
+                };
+                try {
+                    if (adminId) {
+                        await updateAdminDoc(adminId, {
+                            fullName: data.Full_Name,
+                            phone: data.Phone,
+                            adminRole: data.Role
+                        });
+                        const { firstName, lastName } = splitName(data.Full_Name);
+                        await updateUserProfile(adminId, { firstName, lastName, phone: data.Phone });
+                        showToast('Admin updated successfully!');
+                    } else {
+                        const password = document.getElementById('generatedPassword').value;
+                        if (!password) {
+                            showToast('Generate a password first', 'warning');
+                            return;
+                        }
+                        const uid = await createAuthUser(data.Email, password);
+                        const { firstName, lastName } = splitName(data.Full_Name);
+                        await setDoc(doc(db, 'users', uid), {
+                            role: 'staff',
+                            firstName,
+                            lastName,
+                            email: data.Email,
+                            phone: data.Phone,
+                            isAvailable: false,
+                            firstLogin: true,
+                            dateRegistered: new Date().toISOString()
+                        });
+                        await createAdminDoc(uid, {
+                            ...data,
+                            first_login: true,
+                            createdBy: currentUser.uid
+                        });
+                        showToast('Admin created — share the generated password with them.');
+                    }
+                    closeModal('adminModal');
+                } catch (error) {
+                    console.error(error);
+                    showToast(authErrorMessage(error) || 'Error saving admin', 'danger');
+                }
+            });
+
+            // Employee add
+            document.getElementById('employeeForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const password = document.getElementById('employeeGeneratedPassword').value;
+                if (!password) {
+                    showToast('Generate a password first', 'warning');
+                    return;
+                }
+                const name = document.getElementById('employeeName').value.trim();
+                const email = document.getElementById('employeeEmail').value.trim();
+                const phone = document.getElementById('employeePhone').value.trim();
+                try {
+                    const uid = await createAuthUser(email, password);
+                    const { firstName, lastName } = splitName(name);
+                    await setDoc(doc(db, 'users', uid), {
+                        role: 'employee',
+                        firstName,
+                        lastName,
+                        email,
+                        phone,
+                        isAvailable: true,
+                        firstLogin: true,
+                        dateRegistered: new Date().toISOString()
+                    });
+                    showToast('Employee created — share the generated password with them.');
+                    closeModal('employeeModal');
+                } catch (error) {
+                    console.error(error);
+                    showToast(authErrorMessage(error) || 'Error creating employee', 'danger');
+                }
+            });
+        }
+
+        // ==================== FIRST-LOGIN PASSWORD RESET ====================
+        function wireFirstLogin() {
+            const overlay = document.getElementById('firstLoginOverlay');
+            const newPass = document.getElementById('newPassword');
+            const confirmPass = document.getElementById('confirmPassword');
+            const strengthFill = document.getElementById('strengthFill');
+            const form = document.getElementById('firstLoginForm');
+            const requirements = {
+                len: document.getElementById('req-len'),
+                upper: document.getElementById('req-upper'),
+                lower: document.getElementById('req-lower'),
+                number: document.getElementById('req-number'),
+                special: document.getElementById('req-special')
+            };
+
+            function checkStrength(password) {
+                let score = 0;
+                const hasLen = password.length >= 8;
+                const hasUpper = /[A-Z]/.test(password);
+                const hasLower = /[a-z]/.test(password);
+                const hasNumber = /[0-9]/.test(password);
+                const hasSpecial = /[!@#$%^&*]/.test(password);
+                requirements.len.classList.toggle('met', hasLen);
+                requirements.upper.classList.toggle('met', hasUpper);
+                requirements.lower.classList.toggle('met', hasLower);
+                requirements.number.classList.toggle('met', hasNumber);
+                requirements.special.classList.toggle('met', hasSpecial);
+                if (hasLen) score++;
+                if (hasUpper) score++;
+                if (hasLower) score++;
+                if (hasNumber) score++;
+                if (hasSpecial) score++;
+                strengthFill.className = 'password-strength-fill';
+                if (score <= 2) strengthFill.classList.add('weak');
+                else if (score <= 4) strengthFill.classList.add('medium');
+                else strengthFill.classList.add('strong');
+                return score === 5;
+            }
+
+            newPass.addEventListener('input', function () { checkStrength(this.value); });
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const errBox = document.getElementById('firstLoginError');
+                const errText = document.getElementById('firstLoginErrorText');
+                errBox.style.display = 'none';
+                if (newPass.value !== confirmPass.value) {
+                    errText.textContent = 'Passwords do not match.';
+                    errBox.style.display = '';
+                    return;
+                }
+                if (!checkStrength(newPass.value)) {
+                    errText.textContent = 'Please meet all password requirements.';
+                    errBox.style.display = '';
+                    return;
+                }
+                try {
+                    await updatePassword(auth.currentUser, newPass.value);
+                    await updateAdminDoc(currentAdmin.ID, { firstLogin: false });
+                    await updateUserProfile(currentUser.uid, { firstLogin: false });
+                    currentAdmin.first_login = false;
+                    document.getElementById('firstLoginSuccess').style.display = '';
+                    form.style.display = 'none';
+                    setTimeout(() => { overlay.style.display = 'none'; renderProfile(); }, 1500);
+                } catch (error) {
+                    errText.textContent = authErrorMessage(error);
+                    errBox.style.display = '';
+                }
+            });
+        }
+
+        // ==================== STATIC WIRING ====================
+        function wireStatic() {
+            const sidebarOverlay = document.querySelector('.sidebar-overlay');
+
+            // Nav link clicks
+            document.querySelectorAll('.nav-link[data-section]').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    switchSection(link.dataset.section);
+                    document.querySelector('.sidebar').classList.remove('mobile-open');
+                    if (sidebarOverlay) sidebarOverlay.classList.remove('active');
+                });
+            });
+
+            // Quick action / view-all clicks
+            document.querySelectorAll('[data-section]').forEach(el => {
+                if (el.classList.contains('nav-link')) return;
+                el.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    switchSection(el.dataset.section);
+                });
+            });
+
+            // Sidebar mobile toggle
+            const sidebarToggle = document.getElementById('sidebarToggle');
+            const headerToggle = document.getElementById('headerToggle');
+            const sidebar = document.getElementById('sidebar');
+            function toggleSidebar() {
+                sidebar.classList.toggle('mobile-open');
+                if (sidebarOverlay) sidebarOverlay.classList.toggle('active');
+            }
+            if (sidebarToggle) sidebarToggle.addEventListener('click', toggleSidebar);
+            if (headerToggle) headerToggle.addEventListener('click', toggleSidebar);
+            if (sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
+
+            // Close modal on backdrop click
+            document.querySelectorAll('.modal').forEach(modal => {
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) modal.classList.remove('active');
+                });
+            });
+
+            // Toast animations
+            const toastStyles = document.createElement('style');
+            toastStyles.textContent = `
+                @keyframes toastSlideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+                @keyframes toastSlideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } }
+            `;
+            document.head.appendChild(toastStyles);
+
+            // Booking filters — live client-side (replaces GET submit + reload)
+            const bookingFilterForm = document.getElementById('bookingFilterForm');
+            if (bookingFilterForm) {
+                bookingFilterForm.querySelectorAll('input, select').forEach(input => {
+                    const eventType = (input.type === 'text' || input.type === 'search') ? 'input' : 'change';
+                    input.addEventListener(eventType, function () {
+                        clearTimeout(this.filterTimeout);
+                        this.filterTimeout = setTimeout(() => {
+                            currentPage = 1;
+                            renderBookings();
+                        }, 300);
+                    });
+                });
+            }
+
+            // Customer search (row hiding, same as before)
+            document.getElementById('customerSearch')?.addEventListener('input', function () {
+                const searchTerm = this.value.toLowerCase();
+                const rows = document.querySelectorAll('#customersBody tr');
+                rows.forEach(row => {
+                    row.style.display = row.textContent.toLowerCase().includes(searchTerm) ? '' : 'none';
+                });
+            });
+
+            // Logout
+            const doLogout = (e) => { e.preventDefault(); pmaSignOut(); };
+            document.getElementById('logoutBtn').addEventListener('click', doLogout);
+            document.getElementById('profileLogoutBtn').addEventListener('click', doLogout);
+
+            // Close notification dropdown when clicking outside
+            document.addEventListener('click', function (event) {
+                const notificationBell = document.querySelector('.notification-bell');
+                if (notificationBell && !notificationBell.contains(event.target)) {
+                    document.getElementById('notificationDropdown').classList.remove('active');
+                }
+            });
+        }
+
+        // ==================== INIT ====================
+        async function init() {
+            const { user, profile } = await whenAuthReady();
+            if (!user) {
+                window.location.href = 'login.php?redirect=' + encodeURIComponent('admin_dashboard.php');
+                return;
+            }
+            if ((profile?.role || '').toLowerCase() !== 'staff') {
+                window.location.href = 'index.php';
+                return;
+            }
+            currentUser = user;
+
+            // Load or bootstrap the admins/{uid} record (mirrors old MySQL `admins` row)
+            currentAdmin = await getAdminDoc(user.uid);
+            if (!currentAdmin) {
+                const snap = await getDocs(collection(db, 'admins'));
+                const role = snap.empty ? 'main_admin' : 'sub_admin';
+                const name = `${profile?.firstName || ''} ${profile?.lastName || ''}`.trim() || user.email;
+                await createAdminDoc(user.uid, {
+                    Full_Name: name,
+                    Email: user.email,
+                    Phone: profile?.phone || '',
+                    Role: role,
+                    first_login: false,
+                    createdBy: null
+                });
+                currentAdmin = await getAdminDoc(user.uid);
+            }
+            if (currentAdmin.isActive === false) {
+                alert('This admin account has been deactivated.');
+                await pmaSignOut();
+                return;
+            }
+            isMainAdmin = currentAdmin.Role === 'main_admin';
+
+            document.getElementById('headerUserName').textContent = currentAdmin.Full_Name || 'Admin';
+
+            if (isMainAdmin) {
+                document.getElementById('navAdmins').style.display = '';
+                document.getElementById('section-admins').style.display = '';
+                document.getElementById('quickActionAdmins').style.display = '';
+                watchAdmins((list) => { admins = list; renderAdmins(); });
+            }
+
+            // First-login forced password reset
+            if (currentAdmin.first_login) {
+                document.getElementById('firstLoginName').textContent = currentAdmin.Full_Name || currentAdmin.Email;
+                document.getElementById('firstLoginOverlay').style.display = '';
+                wireFirstLogin();
+            }
+
+            // Live Firestore subscriptions
+            watchAllRequests((list) => {
+                bookings = list.map(r => {
+                    const svc = services.find(s => s.ID === r.Service_ID);
+                    return {
+                        ...r,
+                        _status: r.Status,
+                        Status: FS_TO_LEGACY[r.Status] || 'requested',
+                        Service_Duration: svc?.Duration ?? null
+                    };
+                });
+                renderDashboard();
+                renderBookings();
+                runExpirySweep();
+            });
+            watchServices((list) => {
+                services = list;
+                // re-map bookings now that durations are known
+                bookings.forEach(b => {
+                    const svc = services.find(s => s.ID === b.Service_ID);
+                    b.Service_Duration = svc?.Duration ?? null;
+                });
+                renderServices();
+                renderDashboard();
+                renderBookings();
+            });
+            watchProducts((list) => { products = list; renderProducts(); renderDashboard(); });
+            watchCustomers((list) => { customers = list; renderCustomers(); });
+            watchEmployees((list) => { employees = list; renderEmployees(); });
+            watchStaffNotifications(user.uid, (items) => { notifications = items; renderNotifications(); });
+
+            wireStatic();
+            wireForms();
+            renderProfile();
+
+            // Restore the requested section (?section=..., ?edit_profile=1)
+            const params = new URLSearchParams(location.search);
+            const section = params.get('section') || 'dashboard';
+            switchSection(section);
+            if (params.get('edit_profile') === '1') setProfileEditMode(true);
+
+            document.getElementById('authGate').remove();
+        }
+
+        // Expose handlers used by inline onclick attributes
+        Object.assign(window, {
+            switchSection, clearFilters, goPage, openModal, closeModal, showToast,
+            viewBooking, contactCustomer, downloadQuotePDF, viewQuoteDetails, viewQuoteDetailsById,
+            quickAction, updateStatus, openQuoteModal, openAssignModal, exportBookings,
+            editService, toggleServiceAvailability, deleteService,
+            editProduct, toggleProductAvailability, deleteProduct,
+            toggleEmployeeAvailability, openEmployeeModal, generateEmployeePassword, copyEmployeePassword,
+            editAdmin, openAdminModal, deleteAdmin, generateAdminPassword, copyGeneratedPassword,
+            setProfileEditMode,
+            toggleNotificationDropdown, markAdminNotificationRead, markAllAdminNotificationsRead
+        });
+
+        init().catch((e) => {
+            console.error('Admin dashboard init failed:', e);
+            document.getElementById('authGate').innerHTML =
+                '<p style="color:var(--danger,#dc2626);font-weight:600;">Failed to load the admin dashboard.<br>' +
+                esc(e.message || e) + '</p>';
+        });
     </script>
 </body>
 </html>

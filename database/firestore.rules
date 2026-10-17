@@ -7,6 +7,23 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
     function isStaff() { return signedIn() && myRole() == 'staff'; }
+<<<<<<< HEAD
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    function isMainAdmin() {
+      return isStaff() && adminDoc().data.adminRole == 'main_admin';
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isStaff());
+      // Customers self-register; staff may create employee accounts;
+      // only a main admin may create another staff account.
+      allow create: if signedIn() && (
+          (request.auth.uid == uid && request.resource.data.role == 'customer')
+          || (isStaff() && request.resource.data.role == 'employee')
+          || (isMainAdmin() && request.resource.data.role == 'staff'));
+=======
     function isEmployee() { return signedIn() && myRole() == 'employee'; }
     function isCustomer() { return signedIn() && myRole() == 'customer'; }
 
@@ -14,12 +31,27 @@ service cloud.firestore {
       allow read: if signedIn() && (request.auth.uid == uid || isStaff());
       allow create: if signedIn() && request.auth.uid == uid
                     && request.resource.data.role == 'customer';
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow update: if signedIn() && (
           (request.auth.uid == uid && request.resource.data.role == resource.data.role)
           || isStaff());
       allow delete: if false;
     }
 
+<<<<<<< HEAD
+    // Services and products are browsed by anonymous website visitors too.
+    match /services/{id} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    match /products/{id} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    match /requests/{id} {
+=======
     match /services/{id} {
       allow read: if signedIn();
       allow create, update: if isStaff()
@@ -78,21 +110,64 @@ service cloud.firestore {
             && request.resource.data.hasFeedback == true;
       }
 
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow read: if signedIn() && (isStaff()
           || resource.data.customerId == request.auth.uid
           || resource.data.employeeId == request.auth.uid);
 
+<<<<<<< HEAD
+      allow create: if signedIn() && myRole() == 'customer'
+          && request.resource.data.customerId == request.auth.uid
+          && request.resource.data.status == 'Pending'
+          && request.resource.data.employeeId == null;
+
+      allow update:
+        // Staff drive the whole lifecycle (incl. website quote statuses).
+        if (isStaff()
+            && request.resource.data.customerId == resource.data.customerId)
+        || (signedIn() && myRole() == 'employee'
+            && resource.data.employeeId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && ((resource.data.status == 'Approved' && request.resource.data.status == 'In Progress')
+             || (resource.data.status == 'In Progress' && request.resource.data.status == 'Completed')))
+        // Customers: edit their own details while awaiting a quote.
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && resource.data.status in ['Pending', 'Requested', 'Contacted']
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['requestedDate', 'requestedTime', 'siteAddress', 'specialInstructions']))
+        // Customers: approve a quote (Quoted → Confirmed).
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && resource.data.status == 'Quoted'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.status == 'Confirmed')
+        // Customers: cancel a booking / decline a quote.
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && resource.data.status in ['Pending', 'Requested', 'Contacted', 'Quoted', 'Confirmed', 'Approved']
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.status == 'Cancelled')
+        || (signedIn() && resource.data.customerId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hasFeedback']));
+=======
       allow create: if isCustomer() && validNewRequest(request.resource.data);
 
       allow update: if identityUnchanged()
           && (staffMayUpdate() || employeeMayUpdate() || customerMayFlagFeedback());
 
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow delete: if false;
     }
 
     match /feedback/{requestId} {
       allow read: if signedIn() && (isStaff() || resource == null
           || resource.data.customerId == request.auth.uid);
+<<<<<<< HEAD
+      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid
+          && request.resource.data.rating is int
+          && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+          && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'Completed'
+          && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
+=======
 
       allow create: if isCustomer()
           && request.resource.data.customerId == request.auth.uid
@@ -104,10 +179,48 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'Completed'
           && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
 
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow update, delete: if false;
     }
 
     match /notifications/{id} {
+<<<<<<< HEAD
+      // Recipients read their own; staff also read the shared admin feed.
+      allow read: if signedIn() && (resource.data.recipientId == request.auth.uid
+          || isStaff());
+      allow create: if signedIn();
+      allow update: if signedIn() && (isStaff()
+          || (resource.data.recipientId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])));
+      allow delete: if false;
+    }
+
+    // Admin accounts — mirrors the old MySQL `admins` table.
+    // The matching users/{uid} doc (role 'staff') is what actually
+    // grants access; this collection adds main/sub-admin metadata.
+    match /admins/{uid} {
+      allow read: if isStaff();
+      // Bootstrap: a staff member can create their own admin record
+      // (first main_admin). Additional admins are created by a main admin.
+      allow create: if isStaff() && (request.auth.uid == uid || isMainAdmin());
+      // Main admin manages accounts. Each admin may edit their own
+      // profile and clear firstLogin after the forced password change,
+      // but may never change their role, active flag or creator.
+      allow update: if isMainAdmin()
+          || (isStaff() && request.auth.uid == uid
+              && request.resource.data.adminRole == resource.data.adminRole
+              && request.resource.data.isActive == resource.data.isActive
+              && request.resource.data.createdBy == resource.data.createdBy);
+      allow delete: if isMainAdmin();
+    }
+
+    // Website contact form — anyone (even signed out) may submit;
+    // only staff may read the inbox.
+    match /contact_messages/{id} {
+      allow create: if request.resource.data.keys().hasAll(['name', 'email', 'message']);
+      allow read, update, delete: if isStaff();
+    }
+=======
       function validNotification() {
         return request.resource.data.recipientId is string
             && request.resource.data.requestId is string
@@ -128,5 +241,6 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
       allow delete: if false;
     }
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   }
 }

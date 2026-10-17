@@ -1,5 +1,6 @@
 // Main JavaScript file for Phambili Ma-Africa - UI Interactions only
-// Auth handled by PHP sessions in includes/
+// Auth handled by Firebase (js/firebase/) — body gets 'pma-authenticated'
+// or 'pma-anonymous' once auth state resolves.
 
 document.addEventListener('DOMContentLoaded', function() {
     initHeader();
@@ -67,12 +68,12 @@ function initCart() {
     const closeCartBtn = document.getElementById('close-cart-btn');
     const cartSidebar = document.getElementById('cart-sidebar');
     const menuOverlay = document.getElementById('menu-overlay');
-    const isLoggedIn = document.body.dataset.isLoggedIn === 'true';
+    const isLoggedIn = () => document.body.classList.contains('pma-authenticated');
     
     if (!cartBtn || !cartSidebar) return;
     
     function openCart() {
-        if (!isLoggedIn) {
+        if (!isLoggedIn()) {
             window.location.href = 'login.php';
             return;
         }

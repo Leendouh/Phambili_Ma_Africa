@@ -70,18 +70,30 @@ The ERD from Task 1 is maintained as the logical design, mapped to Firestore col
 
 ### Two-Factor Authentication
 - **Task 1**: Planned feature
+<<<<<<< HEAD
+- **Current**: Not implemented (requires paid Firebase Identity Platform)
+- **Mitigation**: Other security measures in place (rules, rate limiting, strong password requirements, role separation)
+- **Future Enhancement**: Can be added with Identity Platform upgrade or simple email verification step
+=======
 - **Current**: Partial. After the password, staff must open a one-time sign-in link emailed to them (Firebase email-link sign-in, free plan) before any admin page opens. The step is valid for 12 hours per browser and every admin page is behind a staff-only route guard. Tested end to end in a real browser against the Firebase emulators, including expired or reused links and links opened without a session
 - **Limitation**: Firebase's built-in multi-factor authentication needs the paid Identity Platform upgrade, so the second step is enforced by the dashboard and not by Firestore. Someone with a staff password who talks to Firestore directly would bypass it
 - **Mitigation**: Firestore rules, rate limiting by Firebase Auth, password rules, role separation, and the fact that staff accounts cannot be self-registered
 - **Future Enhancement**: Server-enforced MFA with Identity Platform
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 
 ## Error Handling
 
 ### Database-Level Integrity
 - **Task 1**: CHECK constraints, UNIQUE constraints, foreign keys
+<<<<<<< HEAD
+- **Current**: Firestore security rules + app-side validation
+- **Limitation**: Firestore has no CHECK constraints or foreign keys
+- **Mitigation**: Security rules enforce business logic (status transitions, feedback rules, role changes)
+=======
 - **Current**: Firestore security rules + app-side validation. The rules are the equivalent of CHECK constraints: they validate field formats (date, time, address length, reference number), rating 1 to 5, comment length, and immutable fields (customer and reference number)
 - **Limitation**: Firestore has no foreign keys
 - **Mitigation**: Security rules enforce business logic (status transitions, feedback rules, role changes) and are verified by 59 automated emulator tests that run in CI. Deletes are blocked everywhere
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 
 ### Status Transition Rules
 - **Task 1**: Database trigger enforces valid status changes
@@ -92,7 +104,11 @@ The ERD from Task 1 is maintained as the logical design, mapped to Firestore col
 - **Task 1**: Database trigger creates notifications on status change
 - **Current**: App creates notification when updating status
 - **Limitation**: If status is updated directly in Firebase Console (bypassing app), no notification is created
+<<<<<<< HEAD
+- **Mitigation**: Staff should only use the admin dashboard to update requests
+=======
 - **Mitigation**: Staff should only use the admin dashboard to update requests. The rules also stop employees notifying anyone except the customer of their own job, and stop customers creating notifications
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 
 ## Connectivity
 

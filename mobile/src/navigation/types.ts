@@ -8,6 +8,7 @@ export type AuthStackParamList = {
   Onboarding: undefined;
   Login: undefined;
   Register: undefined;
+  ForcePassword: undefined;
   ForgotPassword: undefined;
   OTP: { email: string };
 };

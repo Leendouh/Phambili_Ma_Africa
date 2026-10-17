@@ -39,6 +39,8 @@ jobs:
           cache-dependency-path: admin/package-lock.json
       - run: npm ci
       - run: npm run build
+<<<<<<< HEAD
+=======
 
   rules:
     name: Firestore security rules (emulator tests)
@@ -57,3 +59,4 @@ jobs:
       - run: npm ci
         working-directory: database/rules-tests
       - run: npx -y firebase-tools@14 emulators:exec --only firestore --project demo-phambili "npm test --prefix database/rules-tests"
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548

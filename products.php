@@ -1,52 +1,3 @@
-<?php
-// Start session and include database connection
-require_once 'includes/config_session.inc.php';
-require_once 'includes/dbh.inc.php';
-
-// Get user data if logged in
-$user_id = $_SESSION['user_id'] ?? null;
-$user_name = $_SESSION['user_name'] ?? '';
-$user_role = $_SESSION['user_role'] ?? '';
-
-// Check user login status
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-$user_email = $_SESSION['user_email'] ?? '';
-
-// Fetch notifications for customer
-$notifications = [];
-$unreadCount = 0;
-if ($is_customer && $user_id) {
-    require_once 'includes/notifications_model.inc.php';
-    $notifications = get_notifications($pdo, $user_id, 'customer', true, 5);
-    $unreadCount = get_unread_notification_count($pdo, $user_id, 'customer');
-}
-
-// Get cart count from session or localStorage (will be handled by JS)
-$cart_count = 0;
-
-// Fetch products from database
-require_once 'includes/product_model.inc.php';
-$products = getAvailableProducts($pdo);
-$categories = getProductCategories($pdo);
-
-// Get filter parameters
-$category_filter = $_GET['category'] ?? '';
-$search_query = $_GET['search'] ?? '';
-
-// Apply filters
-if ($category_filter) {
-    $products = getProductsByCategory($pdo, $category_filter);
-} elseif ($search_query) {
-    $products = searchProducts($pdo, $search_query);
-}
-
-// Check if products exist
-$has_products = !empty($products);
-
-?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -77,7 +28,7 @@ $has_products = !empty($products);
     <link rel="stylesheet" href="./css/social-media.css">
     </head>
 
-    <body data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+    <body">
 
         <!-- Updated Header Section -->
         <header class="header">
@@ -95,14 +46,9 @@ $has_products = !empty($products);
 
             <!-- Icons (Right) -->
             <div class="header-icons">
-                <?php if ($is_customer && $user_id): ?>
-                <!-- Notification Bell -->
-                <div class="notification-bell-customer">
+                <div class="notification-bell-customer" data-auth="role:customer">
                     <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
                         <i class="fas fa-bell"></i>
-                        <?php if ($unreadCount > 0): ?>
-                            <span class="notification-badge-customer"><?php echo $unreadCount; ?></span>
-                        <?php endif; ?>
                     </button>
                     <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
                         <div class="notification-dropdown-header">
@@ -110,92 +56,69 @@ $has_products = !empty($products);
                             <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
                         </div>
                         <div class="notification-dropdown-content">
-                            <?php if (empty($notifications)): ?>
-                                <div class="no-notifications">
-                                    <i class="fas fa-bell-slash"></i>
-                                    <p>No new notifications</p>
-                                </div>
-                            <?php else: ?>
-                                <?php foreach ($notifications as $notif): ?>
-                                    <div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
-                                        <div class="notif-content">
-                                            <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                            <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                            <small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                                        </div>
-                                        <button class="notif-close" onclick="markCustomerNotificationRead(<?php echo $notif['ID']; ?>)">
-                                            <i class="fas fa-times"></i>
-                                        </button>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
+                            <div class="no-notifications">
+                                <i class="fas fa-bell-slash"></i>
+                                <p>No new notifications</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <?php endif; ?>
-                <?php if ($is_logged_in): ?>
-                    <!-- User Profile Dropdown (shown when logged in) -->
-                    <div class="user-profile-dropdown" id="user-profile-dropdown">
-                        <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
-                            <img src="images/user.png" alt="User" class="icon" id="user-icon">
-                        </button>
-                        <div class="profile-dropdown-menu" id="profile-dropdown-menu">
-                            <?php if ($is_admin): ?>
-                                <!-- Admin Profile Dropdown -->
-                                <div class="profile-dropdown-header">
-                                    <i class="fas fa-user-shield admin-icon"></i>
-                                    <div class="profile-info">
-                                        <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Administrator'); ?></span>
-                                        <span class="profile-role">Admin</span>
-                                    </div>
+                <div class="user-profile-dropdown" id="user-profile-dropdown" data-auth="in">
+                    <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
+                        <img src="images/user.png" alt="User" class="icon" id="user-icon">
+                    </button>
+                    <div class="profile-dropdown-menu" id="profile-dropdown-menu">
+                        <div data-auth="role:staff,admin,main_admin,super_admin">
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user-shield admin-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name" data-user-name>Administrator</span>
+                                    <span class="profile-role">Admin</span>
                                 </div>
-                                <div class="profile-dropdown-links">
-                                    <a href="admin_dashboard.php" class="dropdown-link">
-                                        <i class="fas fa-tachometer-alt"></i>
-                                        Admin Dashboard
-                                    </a>
-                                    <a href="includes/logout.inc.php" class="dropdown-link logout-link">
-                                        <i class="fas fa-sign-out-alt"></i>
-                                        Log Out
-                                    </a>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="#" class="dropdown-link admin-app-link">
+                                    <i class="fas fa-tachometer-alt"></i>
+                                    Admin Dashboard
+                                </a>
+                                <a href="#" class="dropdown-link logout-link" data-logout>
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
+                        </div>
+                        <div data-auth="role:customer">
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user customer-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name" data-user-name>Customer</span>
+                                    <span class="profile-role">Customer</span>
                                 </div>
-                            <?php elseif ($is_customer): ?>
-                                <!-- Customer Profile Dropdown -->
-                                <div class="profile-dropdown-header">
-                                    <i class="fas fa-user customer-icon"></i>
-                                    <div class="profile-info">
-                                        <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Customer'); ?></span>
-                                        <span class="profile-role">Customer</span>
-                                    </div>
-                                </div>
-                                <div class="profile-dropdown-links">
-                                    <a href="bookings.php" class="dropdown-link">
-                                        <i class="fas fa-calendar-check"></i>
-                                        Bookings
-                                    </a>
-                                    <a href="profile.php" class="dropdown-link">
-                                        <i class="fas fa-user"></i>
-                                        Profile
-                                    </a>
-                                    <a href="includes/logout.inc.php" class="dropdown-link logout-link">
-                                        <i class="fas fa-sign-out-alt"></i>
-                                        Log Out
-                                    </a>
-                                </div>
-                            <?php endif; ?>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="bookings.php" class="dropdown-link">
+                                    <i class="fas fa-calendar-check"></i>
+                                    Bookings
+                                </a>
+                                <a href="profile.php" class="dropdown-link">
+                                    <i class="fas fa-user"></i>
+                                    Profile
+                                </a>
+                                <a href="#" class="dropdown-link logout-link" data-logout>
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
                         </div>
                     </div>
-                <?php else: ?>
-                    <!-- Guest: Icon redirects to login page -->
-                    <a href="login.php" class="icon-link" aria-label="Login/Register">
-                        <img src="images/user.png" alt="Login" class="icon">
-                    </a>
-                <?php endif; ?>
+                </div>
+                <!-- Guest: Icon redirects to login page -->
+                <a href="login.php" class="icon-link" aria-label="Login/Register" data-auth="out">
+                    <img src="images/user.png" alt="Login" class="icon">
+                </a>
                 <button class="cart-btn" id="cart-btn" aria-label="Shopping Cart">
                     <img src="images/shopping-bag.png" alt="" class="icon">
-                    <?php if (isset($_SESSION["user_id"])): ?>
-                        <span class="cart-badge">0</span>
-                    <?php endif; ?>
+                    <span class="cart-badge" data-auth="in">0</span>
                 </button>
             </div>
         </header>
@@ -225,37 +148,30 @@ $has_products = !empty($products);
                 <li class="nav-item"><a href="products.php" class="nav-link"> Products</a></li>
 
                 <!-- Dynamic navigation based on role -->
-                <?php if ($is_admin): ?>
-                    <!-- Admin sees Admin Dashboard link instead of Login -->
-                    <li class="nav-item">
-                        <a href="admin_dashboard.php" class="nav-link admin-nav-link">
-                            Admin Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
-                    </li>
-                <?php elseif ($is_customer): ?>
-                    <!-- Customer sees Profile and Logout -->
-                    <li class="nav-item">
-                        <a href="bookings.php" class="nav-link">
-                            Bookings
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="profile.php" class="nav-link">
-                            Profile
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
-                    </li>
-                <?php else: ?>
-                    <!-- Guest sees Login -->
-                    <li class="nav-item">
-                        <a href="login.php" class="nav-link"> Log In</a>
-                    </li>
-                <?php endif; ?>
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link admin-nav-link admin-app-link">
+                        Admin Dashboard
+                    </a>
+                </li>
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
+                </li>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="bookings.php" class="nav-link">
+                        Bookings
+                    </a>
+                </li>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="profile.php" class="nav-link">
+                        Profile
+                    </a>
+                </li>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
+                </li>
+                <li class="nav-item" data-auth="out">
+                    <a href="login.php" class="nav-link"> Log In</a>
+                </li>
 
                 <li class="nav-item">
                     <a href="booking.php" class="nav-link book-now-btn ">
@@ -329,7 +245,7 @@ $has_products = !empty($products);
                     </div>
                     <p class="cart-shipping">Shipping & taxes calculated at checkout</p>
                 </div>
-                <a href="#checkout.php" class="checkout-btn" id="checkout-btn">Proceed to Checkout</a>
+                <a href="contact.php" class="checkout-btn" id="checkout-btn">Enquire About This Order</a>
                 <div class="cart-payment-methods">
                     <svg viewBox="0 0 38 24" width="38" height="24">
                         <path fill="#5A6988"
@@ -355,71 +271,33 @@ $has_products = !empty($products);
             </section>
 
             <div class="product-container">
-                <?php if ($has_products): ?>
-                    <!-- Product Filter Section -->
-                    <section class="product-filter-section">
-                        <div class="product-filter-container">
-                            <div class="product-search-box">
-                                <input type="text" id="product-search" placeholder="Search products..." value="<?php echo htmlspecialchars($search_query); ?>">
-                                <i class="fas fa-search"></i>
-                            </div>
-                            <div class="category-filter">
-                                <select id="category-select">
-                                    <option value="">All Categories</option>
-                                    <?php foreach ($categories as $category): ?>
-                                        <option value="<?php echo htmlspecialchars($category); ?>" <?php echo $category_filter === $category ? 'selected' : ''; ?>>
-                                            <?php echo htmlspecialchars($category); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
+                <!-- Product Filter Section (shown when products exist) -->
+                <section class="product-filter-section" id="productFilterSection" hidden>
+                    <div class="product-filter-container">
+                        <div class="product-search-box">
+                            <input type="text" id="product-search" placeholder="Search products...">
+                            <i class="fas fa-search"></i>
                         </div>
-                    </section>
+                        <div class="category-filter">
+                            <select id="category-select">
+                                <option value="">All Categories</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
 
                 <!-- Products Grid Section -->
                 <section class="products-grid-section">
-                    <?php if (empty($products)): ?>
+                    <div class="products-grid" id="productsGrid">
                         <div class="no-products">
-                            <i class="fas fa-box-open"></i>
-                            <h3>No Products Found</h3>
-                            <p>Try adjusting your search or filter criteria.</p>
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <h3>Loading products...</h3>
                         </div>
-                    <?php else: ?>
-                        <div class="products-grid">
-                            <?php foreach ($products as $product): ?>
-                                <div class="product-card" data-product-id="<?php echo $product['ID']; ?>">
-                                    <div class="product-image">
-                                        <?php if ($product['Image_URL']): ?>
-                                            <img src="<?php echo htmlspecialchars($product['Image_URL']); ?>" alt="<?php echo htmlspecialchars($product['Name']); ?>">
-                                        <?php else: ?>
-                                            <div class="product-placeholder">
-                                                <i class="fas fa-bottle-droplet"></i>
-                                            </div>
-                                        <?php endif; ?>
-                                        <?php if ($product['Stock_Quantity'] <= 5): ?>
-                                            <span class="stock-badge low-stock">Low Stock</span>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="product-info">
-                                        <h3 class="product-name"><?php echo htmlspecialchars($product['Name']); ?></h3>
-                                        <p class="product-category"><?php echo htmlspecialchars($product['Category'] ?? 'General'); ?></p>
-                                        <p class="product-description"><?php echo htmlspecialchars(substr($product['Description'] ?? '', 0, 100)); ?>...</p>
-                                        <div class="product-price-row">
-                                            <span class="product-price">R<?php echo number_format($product['Price'], 2); ?></span>
-                                            <span class="product-stock"><?php echo $product['Stock_Quantity']; ?> in stock</span>
-                                        </div>
-                                        <button class="add-to-cart-btn" data-product-id="<?php echo $product['ID']; ?>" <?php echo $product['Stock_Quantity'] <= 0 ? 'disabled' : ''; ?>>
-                                            <?php echo $product['Stock_Quantity'] <= 0 ? 'Out of Stock' : 'Add to Cart'; ?>
-                                        </button>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
+                    </div>
                 </section>
-            <?php else: ?>
-                <!-- Coming Soon Section -->
-                <section class="product-coming-soon-container">
+
+                <!-- Coming Soon Section (shown when no products exist) -->
+                <section class="product-coming-soon-container" id="comingSoonSection" hidden>
                     <div class="product-coming-soon-content">
                         <div class="product-coming-soon-icon">
                             <i class="fas fa-broom"></i>
@@ -428,9 +306,8 @@ $has_products = !empty($products);
                         <p>We're currently curating our selection of premium cleaning products for you to purchase.
                             Sign up below to be notified when our product line launches.</p>
 
-                        <form class="product-notify-form" action="includes/product_notify.php" method="post">
-                            <input type="email" name="email" placeholder="Enter your email address" required
-                                value="<?php echo htmlspecialchars($user_email ?? ''); ?>">
+                        <form class="product-notify-form" id="productNotifyForm">
+                            <input type="email" name="email" id="notifyEmail" placeholder="Enter your email address" required>
                             <button type="submit">Notify Me</button>
                         </form>
 
@@ -469,7 +346,6 @@ $has_products = !empty($products);
                         </div>
                     </div>
                 </section>
-            <?php endif; ?>
             </div>
 
             <!-- Social Media Section -->
@@ -626,361 +502,180 @@ $has_products = !empty($products);
         </button>
     </footer>
 
+    <script src="./js/config.js"></script>
     <script src="./js/script.js"></script>
-    <script>
-        // Customer notification dropdown functionality
-        function toggleCustomerNotificationDropdown() {
-            const dropdown = document.getElementById('notificationDropdownCustomer');
-            if (dropdown) {
-                dropdown.classList.toggle('active');
-            }
-        }
+    <script type="module" src="./js/firebase/ui.js"></script>
+    <script type="module" src="./js/firebase/notifications.js"></script>
+    <script type="module">
+        import { getProducts, saveContactMessage } from './js/firebase/data.js';
+        import { onAuth } from './js/firebase/auth.js';
 
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const notificationBell = document.querySelector('.notification-bell-customer');
-            if (notificationBell && !notificationBell.contains(event.target)) {
-                const dropdown = document.getElementById('notificationDropdownCustomer');
-                if (dropdown) {
-                    dropdown.classList.remove('active');
-                }
-            }
-        });
+        const esc = (s) => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
 
-        // Mark individual notification as read
-        async function markCustomerNotificationRead(notificationId) {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_read', notification_id: notificationId })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
-                    if (notifItem) {
-                        notifItem.style.opacity = '0';
-                        setTimeout(() => notifItem.remove(), 300);
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        const currentCount = parseInt(badge.textContent);
-                        if (currentCount > 1) {
-                            badge.textContent = currentCount - 1;
-                        } else {
-                            badge.remove();
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
+        const grid = document.getElementById('productsGrid');
+        const filterSection = document.getElementById('productFilterSection');
+        const comingSoon = document.getElementById('comingSoonSection');
+        const searchInput = document.getElementById('product-search');
+        const categorySelect = document.getElementById('category-select');
+        const CART_KEY = (window.CONFIG?.STORAGE_KEYS?.CART) || 'pma_cart';
 
-        // Mark all notifications as read
-        async function markAllCustomerNotificationsRead() {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_all_read' })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const dropdownContent = document.querySelector('.notification-dropdown-customer .notification-dropdown-content');
-                    if (dropdownContent) {
-                        dropdownContent.innerHTML = '<div class="no-notifications"><i class="fas fa-bell-slash"></i><p>No new notifications</p></div>';
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        badge.remove();
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
+        let allProducts = [];
 
-        <?php if ($has_products): ?>
-        // Products Page JavaScript - Cart and Filtering
-        document.addEventListener('DOMContentLoaded', function() {
-            initProductFilters();
-            initCart();
-            initAddToCartButtons();
-        });
-
-        // Product Filtering
-        function initProductFilters() {
-            const searchInput = document.getElementById('product-search');
-            const categorySelect = document.getElementById('category-select');
-
-            if (searchInput) {
-                let debounceTimer;
-                searchInput.addEventListener('input', function() {
-                    clearTimeout(debounceTimer);
-                    debounceTimer = setTimeout(() => {
-                        applyFilters();
-                    }, 300);
-                });
-            }
-
-            if (categorySelect) {
-                categorySelect.addEventListener('change', applyFilters);
-            }
+        function productCard(p) {
+            const outOfStock = p.Stock_Quantity <= 0;
+            return `
+                <div class="product-card" data-product-id="${esc(p.ID)}">
+                    <div class="product-image">
+                        ${p.Image_URL
+                            ? `<img src="${esc(p.Image_URL)}" alt="${esc(p.Name)}">`
+                            : '<div class="product-placeholder"><i class="fas fa-bottle-droplet"></i></div>'}
+                        ${p.Stock_Quantity <= 5 && !outOfStock ? '<span class="stock-badge low-stock">Low Stock</span>' : ''}
+                    </div>
+                    <div class="product-info">
+                        <h3 class="product-name">${esc(p.Name)}</h3>
+                        <p class="product-category">${esc(p.Category)}</p>
+                        <p class="product-description">${esc((p.Description || '').slice(0, 100))}...</p>
+                        <div class="product-price-row">
+                            <span class="product-price">R${Number(p.Price).toFixed(2)}</span>
+                            <span class="product-stock">${p.Stock_Quantity} in stock</span>
+                        </div>
+                        <button class="add-to-cart-btn" data-product-id="${esc(p.ID)}" ${outOfStock ? 'disabled' : ''}>
+                            ${outOfStock ? 'Out of Stock' : 'Add to Cart'}
+                        </button>
+                    </div>
+                </div>`;
         }
 
         function applyFilters() {
-            const searchValue = document.getElementById('product-search')?.value || '';
-            const categoryValue = document.getElementById('category-select')?.value || '';
-
-            const url = new URL(window.location);
-            if (searchValue) {
-                url.searchParams.set('search', searchValue);
-            } else {
-                url.searchParams.delete('search');
-            }
-            if (categoryValue) {
-                url.searchParams.set('category', categoryValue);
-            } else {
-                url.searchParams.delete('category');
-            }
-
-            window.location.href = url.toString();
+            const q = (searchInput?.value || '').toLowerCase();
+            const cat = categorySelect?.value || '';
+            const filtered = allProducts.filter((p) =>
+                (!cat || p.Category === cat) &&
+                (!q || p.Name.toLowerCase().includes(q) || (p.Description || '').toLowerCase().includes(q)));
+            grid.innerHTML = filtered.length
+                ? filtered.map(productCard).join('')
+                : `<div class="no-products"><i class="fas fa-box-open"></i><h3>No Products Found</h3><p>Try adjusting your search or filter criteria.</p></div>`;
         }
 
-        // Cart Management
-        function initCart() {
-            loadCart();
-            updateCartUI();
+        try {
+            allProducts = (await getProducts()).filter((p) => p.Is_Available);
+        } catch (e) {
+            console.error('Failed to load products:', e);
+            allProducts = [];
         }
 
-        function loadCart() {
-            const cartData = localStorage.getItem('phambili_cart');
-            return cartData ? JSON.parse(cartData) : [];
+        if (allProducts.length) {
+            filterSection.hidden = false;
+            const cats = [...new Set(allProducts.map((p) => p.Category))];
+            categorySelect.innerHTML = '<option value="">All Categories</option>' +
+                cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+            applyFilters();
+            searchInput.addEventListener('input', applyFilters);
+            categorySelect.addEventListener('change', applyFilters);
+        } else {
+            grid.parentElement.hidden = true;
+            comingSoon.hidden = false;
         }
 
+        /* ---------------------------- Cart ---------------------------- */
+        const cartItemsEl = document.getElementById('cart-items');
+        const cartTotalEl = document.getElementById('cart-total');
+
+        function getCart() {
+            try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); }
+            catch { return []; }
+        }
         function saveCart(cart) {
-            localStorage.setItem('phambili_cart', JSON.stringify(cart));
-            updateCartUI();
+            localStorage.setItem(CART_KEY, JSON.stringify(cart));
+            renderCart();
         }
-
-        function addToCart(productId, quantity = 1) {
-            // Check if user is logged in
-            if (!<?php echo $is_logged_in ? 'true' : 'false'; ?>) {
-                showNotification('Please sign in to add items to cart', 'error');
-                // Redirect to login page after a short delay
-                setTimeout(() => {
-                    window.location.href = 'login.php';
-                }, 1500);
-                return;
-            }
-
-            const cart = loadCart();
-            const existingItem = cart.find(item => item.productId === productId);
-
-            if (existingItem) {
-                existingItem.quantity += quantity;
-            } else {
-                cart.push({ productId, quantity });
-            }
-
-            saveCart(cart);
-            showNotification('Product added to cart!', 'success');
-        }
-
-        function removeFromCart(productId) {
-            // Check if user is logged in
-            if (!<?php echo $is_logged_in ? 'true' : 'false'; ?>) {
-                showNotification('Please sign in to manage your cart', 'error');
-                setTimeout(() => {
-                    window.location.href = 'login.php';
-                }, 1500);
-                return;
-            }
-
-            const cart = loadCart();
-            const updatedCart = cart.filter(item => item.productId !== productId);
-            saveCart(updatedCart);
-        }
-
-        function updateCartItemQuantity(productId, quantity) {
-            // Check if user is logged in
-            if (!<?php echo $is_logged_in ? 'true' : 'false'; ?>) {
-                showNotification('Please sign in to manage your cart', 'error');
-                setTimeout(() => {
-                    window.location.href = 'login.php';
-                }, 1500);
-                return;
-            }
-
-            const cart = loadCart();
-            const item = cart.find(item => item.productId === productId);
-
-            if (item) {
-                if (quantity <= 0) {
-                    removeFromCart(productId);
-                } else {
-                    item.quantity = quantity;
-                    saveCart(cart);
-                }
-            }
-        }
-
-        function getCartCount() {
-            const cart = loadCart();
-            return cart.reduce((total, item) => total + item.quantity, 0);
-        }
-
-        function getCartTotal() {
-            const cart = loadCart();
-            let total = 0;
-
-            cart.forEach(item => {
-                const productCard = document.querySelector(`.product-card[data-product-id="${item.productId}"]`);
-                if (productCard) {
-                    const priceElement = productCard.querySelector('.product-price');
-                    if (priceElement) {
-                        const price = parseFloat(priceElement.textContent.replace('R', '').replace(',', ''));
-                        total += price * item.quantity;
-                    }
-                }
+        function renderCart() {
+            const cart = getCart();
+            document.querySelectorAll('.cart-badge').forEach((b) => {
+                b.textContent = cart.reduce((s, i) => s + (i.qty || 1), 0);
             });
-
-            return total;
-        }
-
-        function updateCartUI() {
-            const cartBadge = document.querySelector('.cart-badge');
-            const cartTotal = document.getElementById('cart-total');
-            const cartItems = document.getElementById('cart-items');
-
-            if (cartBadge) {
-                cartBadge.textContent = getCartCount();
+            if (cartTotalEl) {
+                cartTotalEl.textContent =
+                    'R' + cart.reduce((s, i) => s + i.price * (i.qty || 1), 0).toFixed(2);
             }
-
-            if (cartTotal) {
-                cartTotal.textContent = 'R' + getCartTotal().toFixed(2);
-            }
-
-            if (cartItems) {
-                renderCartItems(cartItems);
-            }
-        }
-
-        function renderCartItems(container) {
-            const cart = loadCart();
-
-            if (cart.length === 0) {
-                container.innerHTML = `
+            if (!cartItemsEl) return;
+            if (!cart.length) {
+                cartItemsEl.innerHTML = `
                     <div class="empty-cart">
-                        <svg viewBox="0 0 24 24" width="48" height="48">
-                            <path fill="currentColor"
-                                d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z" />
-                        </svg>
+                        <i class="fas fa-cart-shopping" style="font-size:48px; opacity:.4;"></i>
                         <p>Your cart is empty</p>
-                    </div>
-                `;
+                    </div>`;
                 return;
             }
-
-            let html = '';
-            cart.forEach(item => {
-                const productCard = document.querySelector(`.product-card[data-product-id="${item.productId}"]`);
-                if (productCard) {
-                    const name = productCard.querySelector('.product-name')?.textContent || 'Product';
-                    const price = productCard.querySelector('.product-price')?.textContent || 'R0.00';
-                    const image = productCard.querySelector('.product-image img')?.src || '';
-
-                    html += `
-                        <div class="cart-item" data-product-id="${item.productId}">
-                            <div class="cart-item-image">
-                                ${image ? `<img src="${image}" alt="${name}">` : '<div class="cart-item-placeholder"><i class="fas fa-bottle-droplet"></i></div>'}
-                            </div>
-                            <div class="cart-item-details">
-                                <h4>${name}</h4>
-                                <p class="cart-item-price">${price}</p>
-                                <div class="cart-item-quantity">
-                                    <button class="quantity-btn decrease" onclick="updateCartItemQuantity(${item.productId}, ${item.quantity - 1})">
-                                        <i class="fas fa-minus"></i>
-                                    </button>
-                                    <span class="quantity-value">${item.quantity}</span>
-                                    <button class="quantity-btn increase" onclick="updateCartItemQuantity(${item.productId}, ${item.quantity + 1})">
-                                        <i class="fas fa-plus"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <button class="cart-item-remove" onclick="removeFromCart(${item.productId})">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    `;
-                }
-            });
-
-            container.innerHTML = html;
+            cartItemsEl.innerHTML = cart.map((i) => `
+                <div class="cart-item" data-id="${esc(i.id)}">
+                    <div class="cart-item-details">
+                        <span class="cart-item-name">${esc(i.name)}</span>
+                        <span class="cart-item-price">R${(i.price * (i.qty || 1)).toFixed(2)}</span>
+                    </div>
+                    <div class="cart-item-controls">
+                        <button type="button" class="cart-item-decrease" data-cart="dec" aria-label="Decrease">−</button>
+                        <span class="cart-item-quantity">${i.qty || 1}</span>
+                        <button type="button" class="cart-item-increase" data-cart="inc" aria-label="Increase">+</button>
+                        <button type="button" class="cart-item-remove" data-cart="rm" aria-label="Remove item">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>`).join('');
         }
 
-        // Add to Cart Buttons
-        function initAddToCartButtons() {
-            const addToCartButtons = document.querySelectorAll('.add-to-cart-btn');
+        // Add to cart + in-drawer quantity controls (delegated)
+        document.addEventListener('click', (e) => {
+            const addBtn = e.target.closest('.add-to-cart-btn');
+            if (addBtn && !addBtn.disabled) {
+                const card = addBtn.closest('.product-card');
+                const name = card?.querySelector('.product-name')?.textContent || '';
+                const price = parseFloat((card?.querySelector('.product-price')?.textContent || '0').replace(/[^\d.]/g, ''));
+                const cart = getCart();
+                const existing = cart.find((i) => i.id === addBtn.dataset.productId);
+                if (existing) existing.qty = (existing.qty || 1) + 1;
+                else cart.push({ id: addBtn.dataset.productId, name, price, qty: 1 });
+                saveCart(cart);
+                const orig = addBtn.textContent;
+                addBtn.textContent = 'Added ✓';
+                setTimeout(() => { addBtn.textContent = orig; }, 1200);
+                return;
+            }
+            const cartBtn = e.target.closest('[data-cart]');
+            if (!cartBtn) return;
+            const id = cartBtn.closest('.cart-item')?.dataset.id;
+            const cart = getCart();
+            const idx = cart.findIndex((i) => i.id === id);
+            if (idx < 0) return;
+            if (cartBtn.dataset.cart === 'inc') cart[idx].qty = (cart[idx].qty || 1) + 1;
+            else if (cartBtn.dataset.cart === 'dec') cart[idx].qty = (cart[idx].qty || 1) - 1;
+            if (cartBtn.dataset.cart === 'rm' || cart[idx].qty <= 0) cart.splice(idx, 1);
+            saveCart(cart);
+        });
 
-            addToCartButtons.forEach(button => {
-                button.addEventListener('click', function() {
-                    const productId = parseInt(this.dataset.productId);
-                    if (productId && !this.disabled) {
-                        addToCart(productId);
-                    }
+        // Refresh the drawer whenever it opens (script.js owns open/close).
+        document.getElementById('cart-btn')?.addEventListener('click', renderCart);
+        renderCart();
+
+        // Notify-me form (coming soon)
+        document.getElementById('productNotifyForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('notifyEmail').value.trim();
+            try {
+                await saveContactMessage({
+                    name: 'Product notify', email, subject: 'Product launch notify request',
+                    message: 'Please notify me when products launch.',
                 });
-            });
-        }
+                e.target.innerHTML = '<p>Thanks! We will let you know.</p>';
+            } catch (err) {
+                console.error(err);
+            }
+        });
 
-        // Notification System
-        function showNotification(message, type = 'success') {
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
-            notification.innerHTML = `
-                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-                <span>${message}</span>
-            `;
-
-            document.body.appendChild(notification);
-
-            setTimeout(() => {
-                notification.classList.add('show');
-            }, 10);
-
-            setTimeout(() => {
-                notification.classList.remove('show');
-                setTimeout(() => notification.remove(), 300);
-            }, 3000);
-        }
-
-        // Cart Sidebar Toggle
-        const cartBtn = document.getElementById('cart-btn');
-        const cartSidebar = document.getElementById('cart-sidebar');
-        const closeCartBtn = document.getElementById('close-cart-btn');
-        const menuOverlay = document.getElementById('menu-overlay');
-
-        if (cartBtn && cartSidebar) {
-            cartBtn.addEventListener('click', () => {
-                cartSidebar.classList.add('active');
-                menuOverlay.classList.add('active');
-            });
-        }
-
-        if (closeCartBtn && cartSidebar) {
-            closeCartBtn.addEventListener('click', () => {
-                cartSidebar.classList.remove('active');
-                menuOverlay.classList.remove('active');
-            });
-        }
-
-        if (menuOverlay) {
-            menuOverlay.addEventListener('click', () => {
-                cartSidebar.classList.remove('active');
-                menuOverlay.classList.remove('active');
-            });
-        }
-        <?php endif; ?>
+        // Pre-fill notify email for signed-in users
+        onAuth(({ profile }) => {
+            const input = document.getElementById('notifyEmail');
+            if (input && profile?.email) input.value = profile.email;
+        });
     </script>
 </html>

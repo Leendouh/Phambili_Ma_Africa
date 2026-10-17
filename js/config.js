@@ -1,6 +1,20 @@
 // Configuration for Phambili Ma-Africa Website
 const CONFIG = {
-    // API Configuration
+    // Firebase Configuration (same values as mobile/.env and admin/.env)
+    // Firebase Console → Project Settings → Your Apps → Web App
+    // (web API keys are public-by-design; access is enforced by firestore.rules)
+    FIREBASE: {
+        apiKey: 'AIzaSyCfQfCzeSLdZ-NQ_W1_c8W4SxKuZuLFytY',
+        authDomain: 'phambili-ma-africa2.firebaseapp.com',
+        projectId: 'phambili-ma-africa2',
+        appId: '1:462820601375:web:11749bd1d65ad2ff11af2a'
+    },
+
+    // Admin dashboard URL — staff/admin users are sent here after login
+    // (the Firebase-powered admin_dashboard.php; the React app in admin/ is retired)
+    ADMIN_APP_URL: './admin_dashboard.php',
+
+    // API Configuration (legacy PHP API — being phased out)
     API_BASE_URL: './api',
 
     // EmailJS Configuration

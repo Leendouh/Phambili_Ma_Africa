@@ -26,6 +26,8 @@ export const lightColors = {
   progressTint: '#F2EDFA',
   neutralTint: '#EEF1F4',
   goldTint: '#FBF3E2',
+<<<<<<< HEAD
+=======
   teal: '#0E9F8A',
   tealTint: '#DCF3EF',
   violet: '#7B5CF0',
@@ -38,6 +40,7 @@ export const lightColors = {
   skyTint: '#E0F1FC',
   rose: '#E0457B',
   roseTint: '#FBE1EB',
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   white: '#ffffff',
 };
 

@@ -4,7 +4,10 @@ import AuthNavigator from './AuthNavigator';
 import RequestDetailScreen from '../screens/customer/RequestDetailScreen';
 import RequestConfirmationScreen from '../screens/customer/RequestConfirmationScreen';
 import NewRequestScreen from '../screens/customer/NewRequestScreen';
+<<<<<<< HEAD
+=======
 import QuotationScreen from '../screens/customer/QuotationScreen';
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 import JobDetailScreen from '../screens/employee/JobDetailScreen';
 
 const Stack = createNativeStackNavigator();
@@ -15,7 +18,10 @@ export default function RootNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="AuthNavigator" component={AuthNavigator} />
         <Stack.Screen name="NewRequest" component={NewRequestScreen} />
+<<<<<<< HEAD
+=======
         <Stack.Screen name="Quotation" component={QuotationScreen} />
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
         <Stack.Screen name="RequestConfirmation" component={RequestConfirmationScreen} />
         <Stack.Screen name="RequestDetail" component={RequestDetailScreen} />
         <Stack.Screen name="JobDetail" component={JobDetailScreen} />

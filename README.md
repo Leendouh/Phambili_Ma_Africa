@@ -58,6 +58,11 @@ A Firebase-based service request management system with mobile apps for customer
 
 ### 4. Add Security Rules
 
+<<<<<<< HEAD
+1. Go to "Firestore Database" → "Rules"
+2. Copy the contents of `database/firestore.rules` and paste them
+3. Click "Publish"
+=======
 Either paste `database/firestore.rules` into Firestore Database → Rules and click Publish, or deploy from the command line (the project is `phambili-ma-africa2`, see `.firebaserc`):
 
 ```bash
@@ -69,6 +74,7 @@ The rules are covered by 59 emulator tests (see "Automated tests" below). Never 
 ### 4b. Enable the staff email second step
 
 In Authentication → Sign-in method → Email/Password, switch on **Email link (passwordless sign-in)**. The admin dashboard uses it for staff two-step verification. For local development you can switch the step off with `VITE_REQUIRE_EMAIL_2FA=false` in `admin/.env`.
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 
 ### 5. Create Admin and Employee Accounts
 
@@ -233,6 +239,13 @@ Pending → Approved → In Progress → Completed
 
 ## Security
 
+<<<<<<< HEAD
+- Passwords hashed by Firebase Auth
+- Role-based access control via Firestore security rules
+- SQL injection not applicable (NoSQL database)
+- Input validation on all forms
+- Never commit `service_role` keys to GitHub
+=======
 - Passwords hashed and rate-limited by Firebase Auth
 - Role-based access control and data integrity enforced by Firestore security rules (`database/firestore.rules`), deployed to the live project and tested against the emulator
 - Server-side validation in the rules: request date, time and address formats, rating 1 to 5, comment length, reference number format, status transitions (Pending to Approved or Rejected; Approved to In Progress to Completed), one feedback per request, feedback only on Completed requests
@@ -242,6 +255,7 @@ Pending → Approved → In Progress → Completed
 - Honest limit: Firebase's built-in multi-factor authentication needs a paid upgrade, so the second step is enforced by the dashboard, not by Firestore. Someone who knows a staff password and calls Firestore directly (not through the dashboard) would skip it. Real MFA enforcement is listed under future enhancements
 - CSV exports escape quotes and neutralise spreadsheet formulas
 - No secrets in GitHub (`.env` files are git-ignored; Firebase web keys are not secret because the rules protect the data)
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 
 ## Testing
 
@@ -255,13 +269,24 @@ Demo accounts for the `phambili-ma-africa2` Firebase project (change the passwor
 | Employee | employee@test.com | Test123! |
 | Staff (admin dashboard) | staff@test.com | Test123! |
 
+<<<<<<< HEAD
+=======
 Signing in as staff also needs the email second step (the link arrives at the staff email address). Demo requests `PMA-DEMO01` to `PMA-DEMO05` cover every status.
 
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 New customers can also register through the mobile app. Employee and staff accounts must be created in Firebase Console (Authentication, then a matching `users/<uid>` document with the right `role`), because the security rules only allow self-registration as a customer.
 
 ### Automated tests
 
 ```bash
+<<<<<<< HEAD
+cd mobile
+npm test          # Jest: validators and error-message mapping
+npm run typecheck
+npm run lint
+```
+
+=======
 # Mobile app: validators and error-message mapping (66 Jest tests)
 cd mobile
 npm test
@@ -274,11 +299,16 @@ firebase emulators:exec --only firestore --project demo-phambili "npm test --pre
 
 The rules tests act as the five roles (signed out, customer, employee, staff) and check, for example, that an employee cannot skip from Approved to Completed, a customer cannot rate a request that is not Completed, and a garbled date such as `22026-1` is refused.
 
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 ## Future Enhancements
 
 - SMS and push notifications
 - Offline request queuing
+<<<<<<< HEAD
+- Two-factor authentication for staff (requires paid Firebase plan)
+=======
 - Server-enforced multi-factor authentication for staff (needs Firebase Identity Platform, a paid upgrade)
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 - Real-time websockets (already implemented via Firestore onSnapshot)
 
 ## Changes from Task 1
@@ -296,7 +326,10 @@ The rules tests act as the five roles (signed out, customer, employee, staff) an
 `.github/workflows/ci.yml` runs on every push to `main` and every pull request:
 - **mobile**: `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`
 - **admin**: `npm ci`, `npm run build` (includes `tsc -b`)
+<<<<<<< HEAD
+=======
 - **rules**: Firestore emulator runs the 59 security-rule tests
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 
 ## Troubleshooting
 

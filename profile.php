@@ -1,247 +1,3 @@
-<?php
-// Start session and include database connection
-require_once 'includes/config_session.inc.php';
-require_once 'includes/dbh.inc.php';
-
-// Check if user is logged in
-if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php");
-    exit();
-}
-
-// Get user data
-$user_id = $_SESSION['user_id'];
-$user_role = $_SESSION['user_role'] ?? 'customer';
-$user_name = $_SESSION['user_name'] ?? 'User';
-$user_email = $_SESSION['user_email'] ?? '';
-
-// Fetch customer details from database
-try {
-    $stmt = $pdo->prepare("SELECT * FROM customers WHERE ID = ?");
-    $stmt->execute([$user_id]);
-    $customer = $stmt->fetch(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    error_log("Error fetching customer: " . $e->getMessage());
-    $customer = null;
-}
-
-// Fetch user's bookings
-try {
-    $stmt = $pdo->prepare("
-        SELECT b.*, s.Name as Service_Name, s.Image_URL as Service_Image
-        FROM bookings b
-        LEFT JOIN services s ON b.Service_ID = s.ID
-        WHERE b.Customer_ID = ?
-        ORDER BY b.Created_At DESC
-    ");
-    $stmt->execute([$user_id]);
-    $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    error_log("Error fetching bookings: " . $e->getMessage());
-    $bookings = [];
-}
-
-// Include notification functions
-require_once 'includes/notifications_model.inc.php';
-
-// Fetch unread notifications for this customer
-$notifications = get_notifications($pdo, $user_id, 'customer', true, 5);
-$unreadCount = get_unread_notification_count($pdo, $user_id, 'customer');
-
-// Fetch all notifications for history
-$allNotifications = get_notifications($pdo, $user_id, 'customer', false, 20);
-
-// Set default values if customer data not found
-$phone = $customer['Phone'] ?? '';
-$address = $customer['Address'] ?? '';
-$created_at = $customer['Created_At'] ?? date('Y-m-d');
-
-// Format join date
-$join_date = date('F Y', strtotime($created_at));
-
-// Message variables (like admin dashboard)
-$profileMessage = '';
-$profileError = '';
-$passwordMessage = '';
-$passwordError = '';
-$addressMessage = '';
-$addressError = '';
-
-// Parse address into components for display/edit (stored as: Street, City, State, Postal)
-$address_parts = array_map('trim', explode(',', $address));
-$address_street = $address_parts[0] ?? '';
-$address_city = $address_parts[1] ?? '';
-$address_state = $address_parts[2] ?? '';
-$address_zip = $address_parts[3] ?? '';
-
-// Handle Profile Update directly (like admin)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
-    $fullname = trim($_POST['fullname'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $new_phone = trim($_POST['phone'] ?? '');
-
-    // Validation
-    if (empty($fullname)) {
-        $profileError = "Full name is required.";
-    } elseif (strlen($fullname) < 2) {
-        $profileError = "Full name must be at least 2 characters.";
-    } elseif (!preg_match('/^[a-zA-Z\s\-\']+$/', $fullname)) {
-        $profileError = "Full name can only contain letters, spaces, hyphens, and apostrophes.";
-    } elseif (empty($email)) {
-        $profileError = "Email address is required.";
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $profileError = "Please enter a valid email address (e.g., name@example.com).";
-    } elseif (strlen($email) > 254) {
-        $profileError = "Email address is too long.";
-    } elseif (empty($new_phone)) {
-        $profileError = "Phone number is required.";
-    } else {
-        // Strict phone validation - exactly 10 digits, only numbers, South African format
-        $clean_phone = preg_replace('/\D/', '', $new_phone);
-        
-        if (!ctype_digit($clean_phone)) {
-            $profileError = "Phone number must contain only digits (0-9), no letters or special characters.";
-        } elseif (strlen($clean_phone) !== 10) {
-            $profileError = "Phone number must be exactly 10 digits.";
-        } elseif (!preg_match('/^0[0-9]{9}$/', $clean_phone)) {
-            $profileError = "Phone number must start with 0 followed by 9 digits (e.g., 0821234567).";
-        } else {
-            // Check if email already exists for another user
-            try {
-                $stmt = $pdo->prepare("SELECT ID FROM customers WHERE Email = ? AND ID != ?");
-                $stmt->execute([$email, $user_id]);
-                if ($stmt->fetch()) {
-                    $profileError = "Email address is already in use by another account.";
-                } else {
-                    // Update customer with cleaned phone
-                    $stmt = $pdo->prepare("
-                        UPDATE customers 
-                        SET Full_Name = ?, Email = ?, Phone = ?, updatedAt = NOW()
-                        WHERE ID = ?
-                    ");
-                    $stmt->execute([$fullname, $email, $clean_phone, $user_id]);
-
-                    // Update session
-                    $_SESSION['user_name'] = $fullname;
-                    $_SESSION['user_email'] = $email;
-                    $user_name = $fullname;
-                    $user_email = $email;
-                    $phone = $clean_phone;
-
-                    $profileMessage = "Profile updated successfully!";
-                }
-            } catch (PDOException $e) {
-                error_log("Profile update error: " . $e->getMessage());
-                $profileError = "Failed to update profile. Please try again.";
-            }
-        }
-    }
-}
-
-// Handle Address Update directly
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_address'])) {
-    $new_street = trim($_POST['address_street'] ?? '');
-    $new_city = trim($_POST['address_city'] ?? '');
-    $new_state = trim($_POST['address_state'] ?? '');
-    $new_zip = trim($_POST['address_zip'] ?? '');
-
-    // Validation for all address fields
-    if (empty($new_street)) {
-        $addressError = "Street address is required.";
-    } elseif (empty($new_city)) {
-        $addressError = "City is required.";
-    } elseif (empty($new_state)) {
-        $addressError = "State/Province is required.";
-    } elseif (empty($new_zip)) {
-        $addressError = "Postal code is required.";
-    } else {
-        // Postal code validation (4 digits)
-        $postal = preg_replace('/\D/', '', $new_zip);
-        if (!ctype_digit($postal) || strlen($postal) !== 4) {
-            $addressError = "Postal code must be exactly 4 digits (e.g., 2000).";
-        } else {
-            // Combine into single Address field format: Street, City, State, Postal
-            $new_address = implode(', ', array_filter([$new_street, $new_city, $new_state, $postal]));
-
-            try {
-                $stmt = $pdo->prepare("
-                    UPDATE customers 
-                    SET Address = ?, updatedAt = NOW()
-                    WHERE ID = ?
-                ");
-                $stmt->execute([$new_address, $user_id]);
-
-                $address = $new_address;
-                $address_street = $new_street;
-                $address_city = $new_city;
-                $address_state = $new_state;
-                $address_zip = $postal;
-
-                $addressMessage = "Address updated successfully!";
-            } catch (PDOException $e) {
-                error_log("Address update error: " . $e->getMessage());
-                $addressError = "Failed to update address. Please try again.";
-            }
-        }
-    }
-}
-
-// Handle Password Change directly
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
-    $current_password = $_POST['current_password'] ?? '';
-    $new_password = $_POST['new_password'] ?? '';
-    $confirm_password = $_POST['confirm_password'] ?? '';
-
-    // Validation
-    if (empty($current_password)) {
-        $passwordError = "Current password is required.";
-    } elseif (empty($new_password)) {
-        $passwordError = "New password is required.";
-    } elseif (strlen($new_password) < 8) {
-        $passwordError = "New password must be at least 8 characters long.";
-    } elseif ($new_password !== $confirm_password) {
-        $passwordError = "New passwords do not match.";
-    } else {
-        try {
-            // Verify current password
-            $stmt = $pdo->prepare("SELECT Password FROM customers WHERE ID = ?");
-            $stmt->execute([$user_id]);
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$user || !password_verify($current_password, $user['Password'])) {
-                $passwordError = "Current password is incorrect.";
-            } else {
-                // Hash and update new password
-                $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("UPDATE customers SET Password = ? WHERE ID = ?");
-                $stmt->execute([$hashed_password, $user_id]);
-
-                // Delete all remember me tokens for this user (security measure)
-                require_once 'includes/login_model.inc.php';
-                delete_all_remember_me_tokens($pdo, $user_id, 'customer');
-
-                $passwordMessage = "Password changed successfully!";
-            }
-        } catch (PDOException $e) {
-            error_log("Password change error: " . $e->getMessage());
-            $passwordError = "Failed to change password. Please try again.";
-        }
-    }
-}
-
-// Edit modes
-$profileEditMode = isset($_GET['edit']) && $_GET['edit'] === 'profile';
-$addressEditMode = isset($_GET['edit']) && $_GET['edit'] === 'address';
-// Get cart count from session or localStorage (will be handled by JS)
-$cart_count = 0;
-
-// Check user login status
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-$user_email = $_SESSION['user_email'] ?? '';
-
-?>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -284,7 +40,7 @@ $user_email = $_SESSION['user_email'] ?? '';
     </style>
 </head>
 
-<body class="profile-page" data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+<body class="profile-page"">
     <!-- Updated Header Section -->
     <header class="header">
         <!-- Hamburger Menu Button -->
@@ -301,76 +57,52 @@ $user_email = $_SESSION['user_email'] ?? '';
 
         <!-- Icons (Right) -->
         <div class="header-icons">
-            <?php if ($is_customer && $user_id): ?>
-            <!-- Notification Bell -->
-            <div class="notification-bell-customer">
-                <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
-                    <i class="fas fa-bell"></i>
-                    <?php if ($unreadCount > 0): ?>
-                        <span class="notification-badge-customer"><?php echo $unreadCount; ?></span>
-                    <?php endif; ?>
-                </button>
-                <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
-                    <div class="notification-dropdown-header">
-                        <h4>Notifications</h4>
-                        <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
-                    </div>
-                    <div class="notification-dropdown-content">
-                        <?php if (empty($notifications)): ?>
+            <div class="notification-bell-customer" data-auth="role:customer">
+                    <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
+                        <div class="notification-dropdown-header">
+                            <h4>Notifications</h4>
+                            <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
+                        </div>
+                        <div class="notification-dropdown-content">
                             <div class="no-notifications">
                                 <i class="fas fa-bell-slash"></i>
                                 <p>No new notifications</p>
                             </div>
-                        <?php else: ?>
-                            <?php foreach ($notifications as $notif): ?>
-                                <div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
-                                    <div class="notif-content">
-                                        <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                        <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                        <small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                                    </div>
-                                    <button class="notif-close" onclick="markCustomerNotificationRead(<?php echo $notif['ID']; ?>)">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
+                        </div>
                     </div>
                 </div>
-            </div>
-            <?php endif; ?>
-            <?php if ($is_logged_in): ?>
-                <!-- User Profile Dropdown (shown when logged in) -->
-                <div class="user-profile-dropdown" id="user-profile-dropdown">
+            <div class="user-profile-dropdown" id="user-profile-dropdown" data-auth="in">
                     <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
                         <img src="images/user.png" alt="User" class="icon" id="user-icon">
                     </button>
                     <div class="profile-dropdown-menu" id="profile-dropdown-menu">
-                        <?php if ($is_admin): ?>
-                            <!-- Admin Profile Dropdown -->
+                        <div data-auth="role:staff,admin,main_admin,super_admin">
                             <div class="profile-dropdown-header">
                                 <i class="fas fa-user-shield admin-icon"></i>
                                 <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Administrator'); ?></span>
+                                    <span class="profile-name" data-user-name>Administrator</span>
                                     <span class="profile-role">Admin</span>
                                 </div>
                             </div>
                             <div class="profile-dropdown-links">
-                                <a href="admin_dashboard.php" class="dropdown-link">
+                                <a href="#" class="dropdown-link admin-app-link">
                                     <i class="fas fa-tachometer-alt"></i>
                                     Admin Dashboard
                                 </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                <a href="#" class="dropdown-link logout-link" data-logout>
                                     <i class="fas fa-sign-out-alt"></i>
                                     Log Out
                                 </a>
                             </div>
-                        <?php elseif ($is_customer): ?>
-                            <!-- Customer Profile Dropdown -->
+                        </div>
+                        <div data-auth="role:customer">
                             <div class="profile-dropdown-header">
                                 <i class="fas fa-user customer-icon"></i>
                                 <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Customer'); ?></span>
+                                    <span class="profile-name" data-user-name>Customer</span>
                                     <span class="profile-role">Customer</span>
                                 </div>
                             </div>
@@ -383,25 +115,21 @@ $user_email = $_SESSION['user_email'] ?? '';
                                     <i class="fas fa-user"></i>
                                     Profile
                                 </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                <a href="#" class="dropdown-link logout-link" data-logout>
                                     <i class="fas fa-sign-out-alt"></i>
                                     Log Out
                                 </a>
                             </div>
-                        <?php endif; ?>
+                        </div>
                     </div>
                 </div>
-            <?php else: ?>
                 <!-- Guest: Icon redirects to login page -->
-                <a href="login.php" class="icon-link" aria-label="Login/Register">
+                <a href="login.php" class="icon-link" aria-label="Login/Register" data-auth="out">
                     <img src="images/user.png" alt="Login" class="icon">
                 </a>
-            <?php endif; ?>
             <button class="cart-btn" id="cart-btn" aria-label="Shopping Cart">
                 <img src="images/shopping-bag.png" alt="" class="icon">
-                <?php if (isset($_SESSION["user_id"])): ?>
-                    <span class="cart-badge">0</span>
-                <?php endif; ?>
+                <span class="cart-badge" data-auth="in">0</span>
             </button>
         </div>
     </header>
@@ -431,37 +159,30 @@ $user_email = $_SESSION['user_email'] ?? '';
             <li class="nav-item"><a href="products.php" class="nav-link"> Products</a></li>
 
             <!-- Dynamic navigation based on role -->
-            <?php if ($is_admin): ?>
-                <!-- Admin sees Admin Dashboard link instead of Login -->
-                <li class="nav-item">
-                    <a href="admin_dashboard.php" class="nav-link admin-nav-link">
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link admin-nav-link admin-app-link">
                         Admin Dashboard
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
                 </li>
-            <?php elseif ($is_customer): ?>
-                <!-- Customer sees Profile and Logout -->
-                <li class="nav-item">
+                <li class="nav-item" data-auth="role:customer">
                     <a href="bookings.php" class="nav-link">
                         Bookings
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item" data-auth="role:customer">
                     <a href="profile.php" class="nav-link">
                         Profile
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
                 </li>
-            <?php else: ?>
-                <!-- Guest sees Login -->
-                <li class="nav-item">
+                <li class="nav-item" data-auth="out">
                     <a href="login.php" class="nav-link"> Log In</a>
                 </li>
-            <?php endif; ?>
 
             <li class="nav-item">
                 <a href="booking.php" class="nav-link book-now-btn ">
@@ -562,75 +283,22 @@ $user_email = $_SESSION['user_email'] ?? '';
         <div class="profile-container">
 
             <!-- Messages -->
-            <?php if ($profileMessage): ?>
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($profileMessage); ?>
-                </div>
-            <?php endif; ?>
+            <div id="pageMessages"></div>
 
-            <?php if ($profileError): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($profileError); ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($addressMessage): ?>
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($addressMessage); ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($addressError): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($addressError); ?>
-                </div>
-            <?php endif; ?>
-
-            <!-- Notifications -->
-            <?php if (!empty($notifications)): ?>
-                <div class="notification-section">
-                    <div class="notification-header">
-                        <h3><i class="fas fa-bell"></i> Notifications (<?php echo $unreadCount; ?>)</h3>
-                        <a href="#" class="mark-all-read-btn" onclick="markAllAsRead(event)">Mark all as read</a>
-                    </div>
-                    <?php foreach ($notifications as $notif): ?>
-                        <div class="notification-item unread" data-id="<?php echo $notif['ID']; ?>">
-                            <div class="notification-content">
-                                <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                <small class="notification-time"><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                            </div>
-                            <button class="notification-close" onclick="markAsRead(<?php echo $notif['ID']; ?>)">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($passwordMessage): ?>
-                <div class="alert alert-success">
-                    <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($passwordMessage); ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($passwordError): ?>
-                <div class="alert alert-error">
-                    <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($passwordError); ?>
-                </div>
-            <?php endif; ?>
+            <!-- Unread notifications (JS-rendered) -->
+            <div id="unreadNotifications"></div>
 
             <!-- Profile Header -->
             <div class="profile-header">
                 <div class="profile-avatar">
                     <div class="avatar-circle">
-                        <span class="avatar-initials"><?php echo strtoupper(substr($user_name, 0, 1)); ?></span>
+                        <span class="avatar-initials" id="avatarInitials"></span>
                     </div>
                 </div>
                 <div class="profile-info-header">
-                    <h1 class="profile-name"><?php echo htmlspecialchars($user_name); ?></h1>
-                    <p class="profile-email"><?php echo htmlspecialchars($user_email); ?></p>
-                    <span class="profile-role-badge"><?php echo ucfirst($user_role); ?></span>
+                    <h1 class="profile-name" id="profileName"></h1>
+                    <p class="profile-email" id="profileEmail"></p>
+                    <span class="profile-role-badge" id="profileRole"></span>
                 </div>
             </div>
             <!-- Notification History Section -->
@@ -639,34 +307,12 @@ $user_email = $_SESSION['user_email'] ?? '';
                     <h2><i class="fas fa-bell"></i> Notification History</h2>
                 </div>
                 <div class="section-content">
-                    <div class="notifications-history">
-                        <?php if (empty($allNotifications)): ?>
-                            <div class="empty-state">
-                                <i class="fas fa-bell-slash empty-icon"></i>
-                                <h3>No Notifications</h3>
-                                <p>You don't have any notifications yet.</p>
-                            </div>
-                        <?php else: ?>
-                            <div class="notifications-list">
-                                <?php foreach ($allNotifications as $notif): ?>
-                                    <div class="notification-history-item <?php echo $notif['is_read'] ? '' : 'unread'; ?>">
-                                        <div class="notification-history-content">
-                                            <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                            <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                            <div class="notification-meta">
-                                                <span class="notification-time"><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></span>
-                                                <span class="notification-type"><?php echo htmlspecialchars($notif['type']); ?></span>
-                                            </div>
-                                        </div>
-                                        <?php if (!$notif['is_read']): ?>
-                                            <button class="mark-read-btn" onclick="markAsRead(<?php echo $notif['ID']; ?>)">
-                                                <i class="fas fa-check"></i> Mark as Read
-                                            </button>
-                                        <?php endif; ?>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
+                    <div class="notifications-history" id="notificationsHistory">
+                        <div class="empty-state">
+                            <i class="fas fa-bell-slash empty-icon"></i>
+                            <h3>No Notifications</h3>
+                            <p>You don't have any notifications yet.</p>
+                        </div>
                     </div>
                 </div>
 
@@ -679,68 +325,60 @@ $user_email = $_SESSION['user_email'] ?? '';
                 <section class="profile-section" id="personal-info">
                     <div class="section-header">
                         <h2><i class="fas fa-user"></i> Personal Information</h2>
-                        <?php if (!$profileEditMode): ?>
-                            <a href="?edit=profile#personal-info" class="edit-section-btn">
-                                <i class="fas fa-edit"></i> Edit
-                            </a>
-                        <?php endif; ?>
+                        <a href="?edit=profile#personal-info" class="edit-section-btn" id="editProfileBtn">
+                            <i class="fas fa-edit"></i> Edit
+                        </a>
                     </div>
                     <div class="section-content">
-                        <?php if ($profileEditMode): ?>
-                            <!-- Edit Mode -->
-                            <form method="POST" action="profile.php#personal-info">
-                                <div class="info-grid">
-                                    <div class="info-item">
-                                        <label>Full Name</label>
-                                        <input type="text" class="edit-input" name="fullname"
-                                            value="<?php echo htmlspecialchars($user_name); ?>" required>
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Email Address</label>
-                                        <input type="email" class="edit-input" name="email"
-                                            value="<?php echo htmlspecialchars($user_email); ?>" required>
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Phone Number</label>
-                                        <input type="tel" class="edit-input" name="phone" id="profile-phone"
-                                            value="<?php echo htmlspecialchars($phone); ?>"
-                                            placeholder="Enter phone number" maxlength="10">
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Member Since</label>
-                                        <p><?php echo htmlspecialchars($join_date); ?></p>
-                                    </div>
-                                </div>
-                                <div class="section-actions">
-                                    <a href="profile.php#personal-info" class="btn-secondary">
-                                        <i class="fas fa-times"></i> Cancel
-                                    </a>
-                                    <button type="submit" class="btn-primary" name="update_profile">
-                                        <i class="fas fa-save"></i> Save Changes
-                                    </button>
-                                </div>
-                            </form>
-                        <?php else: ?>
-                            <!-- View Mode -->
+                        <!-- Edit Mode -->
+                        <form id="profileEditForm" style="display: none;">
                             <div class="info-grid">
                                 <div class="info-item">
                                     <label>Full Name</label>
-                                    <p><?php echo htmlspecialchars($user_name); ?></p>
+                                    <input type="text" class="edit-input" name="fullname" id="editFullname" required>
                                 </div>
                                 <div class="info-item">
                                     <label>Email Address</label>
-                                    <p><?php echo htmlspecialchars($user_email); ?></p>
+                                    <input type="email" class="edit-input" name="email" id="editEmail" required>
                                 </div>
                                 <div class="info-item">
                                     <label>Phone Number</label>
-                                    <p><?php echo $phone ? htmlspecialchars($phone) : 'Not set'; ?></p>
+                                    <input type="tel" class="edit-input" name="phone" id="profile-phone"
+                                        placeholder="Enter phone number" maxlength="10">
                                 </div>
                                 <div class="info-item">
                                     <label>Member Since</label>
-                                    <p><?php echo htmlspecialchars($join_date); ?></p>
+                                    <p id="editJoinDate"></p>
                                 </div>
                             </div>
-                        <?php endif; ?>
+                            <div class="section-actions">
+                                <a href="profile.php#personal-info" class="btn-secondary" id="cancelProfileEdit">
+                                    <i class="fas fa-times"></i> Cancel
+                                </a>
+                                <button type="submit" class="btn-primary">
+                                    <i class="fas fa-save"></i> Save Changes
+                                </button>
+                            </div>
+                        </form>
+                        <!-- View Mode -->
+                        <div class="info-grid" id="profileView">
+                            <div class="info-item">
+                                <label>Full Name</label>
+                                <p id="viewName"></p>
+                            </div>
+                            <div class="info-item">
+                                <label>Email Address</label>
+                                <p id="viewEmail"></p>
+                            </div>
+                            <div class="info-item">
+                                <label>Phone Number</label>
+                                <p id="viewPhone">Not set</p>
+                            </div>
+                            <div class="info-item">
+                                <label>Member Since</label>
+                                <p id="viewJoinDate"></p>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -748,72 +386,63 @@ $user_email = $_SESSION['user_email'] ?? '';
                 <section class="profile-section" id="address-info">
                     <div class="section-header">
                         <h2><i class="fas fa-map-marker-alt"></i> Address Information</h2>
-                        <?php if (!$addressEditMode): ?>
-                            <a href="?edit=address#address-info" class="edit-section-btn">
-                                <i class="fas fa-edit"></i> Edit
-                            </a>
-                        <?php endif; ?>
+                        <a href="?edit=address#address-info" class="edit-section-btn" id="editAddressBtn">
+                            <i class="fas fa-edit"></i> Edit
+                        </a>
                     </div>
                     <div class="section-content">
-                        <?php if ($addressEditMode): ?>
-                            <!-- Edit Mode -->
-                            <form method="POST" action="profile.php#address-info">
-                                <div class="info-grid">
-                                    <div class="info-item full-width">
-                                        <label>Street Address</label>
-                                        <input type="text" class="edit-input" name="address_street"
-                                            value="<?php echo htmlspecialchars($address_street); ?>"
-                                            placeholder="Enter street address">
-                                    </div>
-                                    <div class="info-item">
-                                        <label>City</label>
-                                        <input type="text" class="edit-input" name="address_city"
-                                            value="<?php echo htmlspecialchars($address_city); ?>"
-                                            placeholder="City">
-                                    </div>
-                                    <div class="info-item">
-                                        <label>State/Province</label>
-                                        <input type="text" class="edit-input" name="address_state"
-                                            value="<?php echo htmlspecialchars($address_state); ?>"
-                                            placeholder="State">
-                                    </div>
-                                    <div class="info-item">
-                                        <label>Postal Code</label>
-                                        <input type="text" class="edit-input" name="address_zip"
-                                            value="<?php echo htmlspecialchars($address_zip); ?>"
-                                            placeholder="Postal Code">
-                                    </div>
-                                </div>
-                                <div class="section-actions">
-                                    <a href="profile.php#address-info" class="btn-secondary">
-                                        <i class="fas fa-times"></i> Cancel
-                                    </a>
-                                    <button type="submit" class="btn-primary" name="update_address">
-                                        <i class="fas fa-save"></i> Save Address
-                                    </button>
-                                </div>
-                            </form>
-                        <?php else: ?>
-                            <!-- View Mode -->
+                        <!-- Edit Mode -->
+                        <form id="addressEditForm" style="display: none;">
                             <div class="info-grid">
                                 <div class="info-item full-width">
                                     <label>Street Address</label>
-                                    <p><?php echo $address_street ? htmlspecialchars($address_street) : 'Not set'; ?></p>
+                                    <input type="text" class="edit-input" name="address_street" id="editStreet"
+                                        placeholder="Enter street address">
                                 </div>
                                 <div class="info-item">
                                     <label>City</label>
-                                    <p><?php echo $address_city ? htmlspecialchars($address_city) : 'Not set'; ?></p>
+                                    <input type="text" class="edit-input" name="address_city" id="editCity"
+                                        placeholder="City">
                                 </div>
                                 <div class="info-item">
                                     <label>State/Province</label>
-                                    <p><?php echo $address_state ? htmlspecialchars($address_state) : 'Not set'; ?></p>
+                                    <input type="text" class="edit-input" name="address_state" id="editState"
+                                        placeholder="State">
                                 </div>
                                 <div class="info-item">
                                     <label>Postal Code</label>
-                                    <p><?php echo $address_zip ? htmlspecialchars($address_zip) : 'Not set'; ?></p>
+                                    <input type="text" class="edit-input" name="address_zip" id="editPostal"
+                                        placeholder="Postal Code">
                                 </div>
                             </div>
-                        <?php endif; ?>
+                            <div class="section-actions">
+                                <a href="profile.php#address-info" class="btn-secondary" id="cancelAddressEdit">
+                                    <i class="fas fa-times"></i> Cancel
+                                </a>
+                                <button type="submit" class="btn-primary">
+                                    <i class="fas fa-save"></i> Save Address
+                                </button>
+                            </div>
+                        </form>
+                        <!-- View Mode -->
+                        <div class="info-grid" id="addressView">
+                            <div class="info-item full-width">
+                                <label>Street Address</label>
+                                <p id="viewStreet">Not set</p>
+                            </div>
+                            <div class="info-item">
+                                <label>City</label>
+                                <p id="viewCity">Not set</p>
+                            </div>
+                            <div class="info-item">
+                                <label>State/Province</label>
+                                <p id="viewState">Not set</p>
+                            </div>
+                            <div class="info-item">
+                                <label>Postal Code</label>
+                                <p id="viewPostal">Not set</p>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -829,19 +458,9 @@ $user_email = $_SESSION['user_email'] ?? '';
                                 <i class="fas fa-key" style="color: var(--primary-color);"></i> Change Password
                             </h4>
 
-                            <?php if ($passwordMessage): ?>
-                                <div class="alert alert-success" style="margin-bottom: 1rem;">
-                                    <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($passwordMessage); ?>
-                                </div>
-                            <?php endif; ?>
+                            <div id="passwordMessages"></div>
 
-                            <?php if ($passwordError): ?>
-                                <div class="alert alert-error" style="margin-bottom: 1rem;">
-                                    <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($passwordError); ?>
-                                </div>
-                            <?php endif; ?>
-
-                            <form method="POST" action="profile.php" class="password-form">
+                            <form id="passwordForm" class="password-form">
                                 <div class="info-grid">
                                     <div class="info-item">
                                         <label>Current Password</label>
@@ -864,7 +483,7 @@ $user_email = $_SESSION['user_email'] ?? '';
                                     </div>
                                 </div>
                                 <div class="section-actions" style="justify-content: flex-start; margin-top: 1.5rem;">
-                                    <button type="submit" class="btn-primary" name="change_password">
+                                    <button type="submit" class="btn-primary">
                                         <i class="fas fa-save"></i> Update Password
                                     </button>
                                 </div>
@@ -880,53 +499,11 @@ $user_email = $_SESSION['user_email'] ?? '';
                         <a href="bookings.php" class="view-all-link">View All</a>
                     </div>
                     <div class="section-content">
-                        <div class="booking-history">
-                            <?php if (empty($bookings)): ?>
-                                <div class="empty-state">
-                                    <i class="fas fa-calendar-check empty-icon"></i>
-                                    <h3>No Bookings Yet</h3>
-                                    <p>You haven't made any bookings yet. Start by booking our cleaning services!</p>
-                                    <a href="services.php" class="btn-primary">
-                                        <i class="fas fa-calendar-plus"></i> Book Services
-                                    </a>
-                                </div>
-                            <?php else: ?>
-                                <div class="bookings-list">
-                                    <?php foreach (array_slice($bookings, 0, 3) as $booking): ?>
-                                        <div class="booking-card status-<?php echo strtolower($booking['Status'] ?? 'requested'); ?>">
-                                            <div class="booking-card-header">
-                                                <div class="booking-service-info">
-                                                    <h4 class="booking-service-name">
-                                                        <?php echo htmlspecialchars($booking['Service_Name'] ?? 'Service Booking'); ?>
-                                                    </h4>
-                                                    <span class="booking-date">
-                                                        <i class="fas fa-calendar"></i>
-                                                        <?php echo date('F j, Y', strtotime($booking['Date'])); ?>
-                                                    </span>
-                                                </div>
-                                                <span class="booking-status status-<?php echo strtolower($booking['Status'] ?? 'requested'); ?>">
-                                                    <?php echo ucfirst($booking['Status'] ?? 'Requested'); ?>
-                                                </span>
-                                            </div>
-                                            <div class="booking-footer">
-                                                <span class="booking-type">
-                                                    <i class="fas fa-file-invoice-dollar"></i> Quotation
-                                                </span>
-                                                <div class="booking-actions">
-                                                    <?php if (!empty($booking['Quoted_Amount']) && $booking['Quoted_Amount'] > 0): ?>
-                                                        <a href="api/generate_quote_pdf.php?id=<?php echo $booking['ID']; ?>" target="_blank" class="btn-outline-small">
-                                                            <i class="fas fa-file-pdf"></i> Download
-                                                        </a>
-                                                    <?php endif; ?>
-                                                    <a href="bookings.php?view=<?php echo $booking['ID']; ?>" class="btn-outline-small">
-                                                        <i class="fas fa-eye"></i> View
-                                                    </a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php endif; ?>
+                        <div class="booking-history" id="recentBookings">
+                            <div class="empty-state">
+                                <i class="fas fa-spinner fa-spin empty-icon"></i>
+                                <h3>Loading bookings...</h3>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -1019,174 +596,255 @@ $user_email = $_SESSION['user_email'] ?? '';
     </footer>
 
     <script src="./js/script.js"></script>
-    <script src="./js/form-validation.js"></script>
-    <script>
-        // Customer notification dropdown functionality
-        function toggleCustomerNotificationDropdown() {
-            const dropdown = document.getElementById('notificationDropdownCustomer');
-            if (dropdown) {
-                dropdown.classList.toggle('active');
-            }
-        }
+    <script src="./js/config.js"></script>
+    <script type="module" src="./js/firebase/ui.js"></script>
+    <script type="module" src="./js/firebase/notifications.js"></script>
+    <script type="module">
+        import {
+            watchMyRequests, updateUserProfile,
+            watchNotifications, markNotificationRead, markAllNotificationsRead,
+        } from './js/firebase/data.js';
+        import { requireAuth, pmaChangePassword, authErrorMessage } from './js/firebase/auth.js';
+        import { showMessage } from './js/firebase/ui.js';
+        import { downloadQuotePdf } from './js/firebase/quotePdf.js';
+        import { updateEmail } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
 
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const notificationBell = document.querySelector('.notification-bell-customer');
-            if (notificationBell && !notificationBell.contains(event.target)) {
-                const dropdown = document.getElementById('notificationDropdownCustomer');
-                if (dropdown) {
-                    dropdown.classList.remove('active');
+        const authed = await requireAuth('profile.php');
+        if (!authed) throw new Error('redirected to login');
+        const { user, profile } = authed;
+
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const $ = id => document.getElementById(id);
+        const messages = $('pageMessages');
+        const addr = (profile && typeof profile.address === 'object') ? (profile.address || {}) : {};
+        const displayName = profile
+            ? `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || user.email
+            : user.email;
+        const joinDate = profile?.dateRegistered
+            ? new Date(profile.dateRegistered).toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' })
+            : (user.metadata?.creationTime
+                ? new Date(user.metadata.creationTime).toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' })
+                : '—');
+
+        /* ------------------------------ Header + view ------------------------------ */
+        $('avatarInitials').textContent = (displayName || '?')[0].toUpperCase();
+        $('profileName').textContent = displayName;
+        $('profileEmail').textContent = user.email || '';
+        $('profileRole').textContent = (profile?.role || 'customer')[0].toUpperCase() + (profile?.role || 'customer').slice(1);
+        $('viewName').textContent = displayName;
+        $('viewEmail').textContent = profile?.email || user.email || '';
+        $('viewPhone').textContent = profile?.phone || 'Not set';
+        $('viewJoinDate').textContent = joinDate;
+        $('editFullname').value = displayName;
+        $('editEmail').value = profile?.email || user.email || '';
+        $('profile-phone').value = profile?.phone || '';
+        $('editJoinDate').textContent = joinDate;
+        $('viewStreet').textContent = addr.street || 'Not set';
+        $('viewCity').textContent = addr.city || 'Not set';
+        $('viewState').textContent = addr.state || 'Not set';
+        $('viewPostal').textContent = addr.postal || 'Not set';
+        $('editStreet').value = addr.street || '';
+        $('editCity').value = addr.city || '';
+        $('editState').value = addr.state || '';
+        $('editPostal').value = addr.postal || '';
+
+        /* ---------------------------- Edit-mode toggles ---------------------------- */
+        function setEditMode(form, view, btn, on) {
+            form.style.display = on ? '' : 'none';
+            view.style.display = on ? 'none' : '';
+            btn.style.display = on ? 'none' : '';
+        }
+        $('editProfileBtn').addEventListener('click', e => {
+            e.preventDefault();
+            setEditMode($('profileEditForm'), $('profileView'), $('editProfileBtn'), true);
+        });
+        $('cancelProfileEdit').addEventListener('click', e => {
+            e.preventDefault();
+            setEditMode($('profileEditForm'), $('profileView'), $('editProfileBtn'), false);
+        });
+        $('editAddressBtn').addEventListener('click', e => {
+            e.preventDefault();
+            setEditMode($('addressEditForm'), $('addressView'), $('editAddressBtn'), true);
+        });
+        $('cancelAddressEdit').addEventListener('click', e => {
+            e.preventDefault();
+            setEditMode($('addressEditForm'), $('addressView'), $('editAddressBtn'), false);
+        });
+        // Honour legacy ?edit=profile / ?edit=address links.
+        const editParam = new URLSearchParams(location.search).get('edit');
+        if (editParam === 'profile') $('editProfileBtn').click();
+        else if (editParam === 'address') $('editAddressBtn').click();
+
+        /* ------------------------------ Save handlers ------------------------------ */
+        $('profileEditForm').addEventListener('submit', async e => {
+            e.preventDefault();
+            try {
+                const parts = $('editFullname').value.trim().split(/\s+/);
+                const fields = {
+                    firstName: parts[0] || '',
+                    lastName: parts.slice(1).join(' '),
+                    phone: $('profile-phone').value.trim(),
+                };
+                const newEmail = $('editEmail').value.trim();
+                let emailNote = '';
+                if (newEmail && newEmail !== user.email) {
+                    fields.email = newEmail;
+                    try {
+                        await updateEmail(user, newEmail);
+                    } catch (err) {
+                        emailNote = ' (sign-in email unchanged — ' + authErrorMessage(err) + ')';
+                    }
                 }
+                await updateUserProfile(user.uid, fields);
+                showMessage('Profile updated successfully.' + emailNote, 'success', messages);
+                setTimeout(() => location.reload(), 900);
+            } catch (err) {
+                console.error(err);
+                showMessage(authErrorMessage(err), 'error', messages);
             }
         });
 
-        // Mark individual notification as read (for dropdown)
-        async function markCustomerNotificationRead(notificationId) {
+        $('addressEditForm').addEventListener('submit', async e => {
+            e.preventDefault();
             try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_read', notification_id: notificationId })
+                await updateUserProfile(user.uid, {
+                    address: {
+                        street: $('editStreet').value.trim(),
+                        city: $('editCity').value.trim(),
+                        state: $('editState').value.trim(),
+                        postal: $('editPostal').value.trim(),
+                    },
                 });
-                const result = await response.json();
-                if (result.success) {
-                    const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
-                    if (notifItem) {
-                        notifItem.style.opacity = '0';
-                        setTimeout(() => notifItem.remove(), 300);
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        const currentCount = parseInt(badge.textContent);
-                        if (currentCount > 1) {
-                            badge.textContent = currentCount - 1;
-                        } else {
-                            badge.remove();
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
+                showMessage('Address saved successfully.', 'success', messages);
+                setTimeout(() => location.reload(), 900);
+            } catch (err) {
+                console.error(err);
+                showMessage(authErrorMessage(err), 'error', messages);
             }
-        }
+        });
 
-        // Mark all notifications as read (for dropdown)
-        async function markAllCustomerNotificationsRead() {
+        $('passwordForm').addEventListener('submit', async e => {
+            e.preventDefault();
+            const cur = e.target.current_password.value;
+            const next = e.target.new_password.value;
+            const confirm = e.target.confirm_password.value;
+            if (next !== confirm) {
+                showMessage('New passwords do not match.', 'error', $('passwordMessages'));
+                return;
+            }
             try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_all_read' })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const dropdownContent = document.querySelector('.notification-dropdown-customer .notification-dropdown-content');
-                    if (dropdownContent) {
-                        dropdownContent.innerHTML = '<div class="no-notifications"><i class="fas fa-bell-slash"></i><p>No new notifications</p></div>';
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        badge.remove();
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
+                await pmaChangePassword(cur, next);
+                e.target.reset();
+                showMessage('Password updated successfully.', 'success', $('passwordMessages'));
+            } catch (err) {
+                console.error(err);
+                showMessage(authErrorMessage(err), 'error', $('passwordMessages'));
             }
-        }
+        });
 
-        // Mark individual notification as read (for page notifications)
-        function markAsRead(notificationId) {
-            fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_read',
-                        notification_id: notificationId
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
-                        if (notifItem) {
-                            notifItem.style.opacity = '0';
-                            setTimeout(() => notifItem.remove(), 300);
-                        }
-                    }
-                })
-                .catch(error => console.error('Error:', error));
-        }
+        /* ------------------------------ Notifications ------------------------------ */
+        const fmtNotifTime = iso => {
+            if (!iso) return '';
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-ZA', { month: 'short', day: 'numeric', year: 'numeric' }) +
+                ' ' + d.toLocaleTimeString('en-ZA', { hour: 'numeric', minute: '2-digit' });
+        };
 
-        // Mark all notifications as read
-        function markAllAsRead(event) {
-            event.preventDefault();
-            fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_all_read'
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const notifSection = document.querySelector('.notification-section');
-                        if (notifSection) {
-                            notifSection.style.opacity = '0';
-                            setTimeout(() => notifSection.remove(), 300);
-                        }
-                    }
-                })
-                .catch(error => console.error('Error:', error));
-        }
-        
-        // Phone number input validation - only digits, max 10 chars
-        document.addEventListener('DOMContentLoaded', function() {
-            const phoneInput = document.getElementById('profile-phone');
-            if (phoneInput) {
-                phoneInput.addEventListener('input', function(e) {
-                    // Remove all non-digit characters
-                    let value = this.value.replace(/\D/g, '');
-                    // Limit to 10 digits
-                    if (value.length > 10) {
-                        value = value.substring(0, 10);
-                    }
-                    this.value = value;
-                });
-                
-                // Prevent paste of non-digits
-                phoneInput.addEventListener('paste', function(e) {
-                    e.preventDefault();
-                    const pasted = (e.clipboardData || window.clipboardData).getData('text');
-                    const digitsOnly = pasted.replace(/\D/g, '').substring(0, 10);
-                    this.value = digitsOnly;
-                });
-            }
-            
-            // Smooth scroll to anchor section without glitch
-            if (window.location.hash) {
-                const targetId = window.location.hash.substring(1);
-                const targetElement = document.getElementById(targetId);
-                if (targetElement) {
-                    // Small delay to ensure page is fully rendered
-                    setTimeout(function() {
-                        targetElement.scrollIntoView({ 
-                            behavior: 'smooth', 
-                            block: 'start' 
-                        });
-                        // Add highlight effect to show which section was targeted
-                        targetElement.style.transition = 'box-shadow 0.5s ease';
-                        targetElement.style.boxShadow = '0 0 20px rgba(13, 110, 253, 0.3)';
-                        setTimeout(function() {
-                            targetElement.style.boxShadow = '';
-                        }, 2000);
-                    }, 100);
+        watchNotifications(user.uid, (items, unreadCount) => {
+            // Quick unread list above the profile header.
+            const unread = items.filter(n => !n.is_read);
+            $('unreadNotifications').innerHTML = unread.length ? `
+                <div class="notification-section">
+                    <div class="notification-header">
+                        <h3><i class="fas fa-bell"></i> Notifications (${unreadCount})</h3>
+                        <a href="#" class="mark-all-read-btn" data-notif="all">Mark all as read</a>
+                    </div>
+                    ${unread.map(n => `
+                        <div class="notification-item unread">
+                            <div class="notification-content">
+                                <strong>${esc(n.title)}</strong>
+                                <p>${esc(n.message)}</p>
+                                <small class="notification-time">${fmtNotifTime(n.created_at)}</small>
+                            </div>
+                            <button class="notification-close" data-notif="${n.ID}"><i class="fas fa-times"></i></button>
+                        </div>`).join('')}
+                </div>` : '';
+
+            // Full history.
+            $('notificationsHistory').innerHTML = items.length
+                ? `<div class="notifications-list">${items.map(n => `
+                    <div class="notification-history-item ${n.is_read ? '' : 'unread'}">
+                        <div class="notification-history-content">
+                            <strong>${esc(n.title)}</strong>
+                            <p>${esc(n.message)}</p>
+                            <div class="notification-meta">
+                                <span class="notification-time">${fmtNotifTime(n.created_at)}</span>
+                                <span class="notification-type">${esc(n._raw?.type || 'notification')}</span>
+                            </div>
+                        </div>
+                        ${!n.is_read ? `<button class="mark-read-btn" data-notif="${n.ID}"><i class="fas fa-check"></i> Mark as Read</button>` : ''}
+                    </div>`).join('')}</div>`
+                : `<div class="empty-state"><i class="fas fa-bell-slash empty-icon"></i>
+                        <h3>No Notifications</h3><p>You don't have any notifications yet.</p></div>`;
+        }, 50);
+
+        document.addEventListener('click', async e => {
+            const btn = e.target.closest('[data-notif]');
+            if (!btn) return;
+            e.preventDefault();
+            try {
+                if (btn.dataset.notif === 'all') {
+                    const ids = [...document.querySelectorAll('[data-notif]')]
+                        .map(el => el.dataset.notif).filter(v => v !== 'all');
+                    await markAllNotificationsRead([...new Set(ids)]);
+                } else {
+                    await markNotificationRead(btn.dataset.notif);
                 }
-            }
+            } catch (err) { console.error(err); }
+        });
+
+        /* ------------------------------- Recent bookings ---------------------------- */
+        const SLUG = {
+            'Pending': 'requested', 'Requested': 'requested', 'Contacted': 'contacted',
+            'Quoted': 'quoted', 'Confirmed': 'confirmed', 'Approved': 'confirmed',
+            'In Progress': 'confirmed', 'Completed': 'completed',
+            'Cancelled': 'cancelled', 'Rejected': 'cancelled', 'Expired': 'expired',
+        };
+        let recent = [];
+        watchMyRequests(user.uid, requests => {
+            recent = requests.slice(0, 3);
+            $('recentBookings').innerHTML = recent.length
+                ? `<div class="bookings-list">${recent.map(b => {
+                    const slug = SLUG[b.Status] || 'requested';
+                    return `
+                    <div class="booking-card status-${slug}">
+                        <div class="booking-card-header">
+                            <div class="booking-service-info">
+                                <h4 class="booking-service-name">${esc(b.serviceName || 'Service Booking')}</h4>
+                                <span class="booking-date"><i class="fas fa-calendar"></i>
+                                    ${b.Date ? new Date(b.Date).toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'}</span>
+                            </div>
+                            <span class="booking-status status-${slug}">${esc(b.Status)}</span>
+                        </div>
+                        <div class="booking-footer">
+                            <span class="booking-type"><i class="fas fa-file-invoice-dollar"></i> Quotation</span>
+                            <div class="booking-actions">
+                                ${b.Quoted_Amount > 0 ? `<button type="button" class="btn-outline-small" data-pdf="${b.ID}"><i class="fas fa-file-pdf"></i> Download</button>` : ''}
+                                <a href="bookings.php?view=${b.ID}" class="btn-outline-small"><i class="fas fa-eye"></i> View</a>
+                            </div>
+                        </div>
+                    </div>`;}).join('')}</div>`
+                : `<div class="empty-state"><i class="fas fa-calendar-check empty-icon"></i>
+                        <h3>No Bookings Yet</h3>
+                        <p>You haven't made any bookings yet. Start by booking our cleaning services!</p>
+                        <a href="services.php" class="btn-primary"><i class="fas fa-calendar-plus"></i> Book Services</a></div>`;
+        });
+
+        $('recentBookings').addEventListener('click', async e => {
+            const btn = e.target.closest('[data-pdf]');
+            if (!btn) return;
+            const b = recent.find(x => x.ID === btn.dataset.pdf);
+            if (b) await downloadQuotePdf(b).catch(console.error);
         });
     </script>
 </body>
