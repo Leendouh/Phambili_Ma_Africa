@@ -375,7 +375,7 @@ Demo accounts on `phambili-ma-africa2` (change passwords before any public deplo
 |------|-------|----------|
 | Customer | customer@test.com | Test123! |
 | Employee | employee@test.com | Test123! |
-| Staff | staff@test.com | Test123! |
+| Staff/Admin |your@email.com | YourPass123!|
 
 Staff sign-in also needs the email second step (link sent to the staff mailbox). Demo requests `PMA-DEMO01`–`PMA-DEMO05` cover every status. New customers can register in the app or on the website; employees and staff must be created in the Firebase Console.
 
