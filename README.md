@@ -87,7 +87,7 @@ Phambili Ma-Africa (Trading Enterprise) is a professional cleaning company. This
 │   ├── seed.js             # Seed data script (services + demo accounts)
 │   └── README.md           # Database setup notes
 │
-├── docs/                   # Additional documentation
+├── Task 2 Documentation/   # Task 2 documentation
 ├── firebase.json           # Firestore rules path + emulator ports
 ├── .firebaserc             # Default project: phambili-ma-africa2
 └── .github/workflows/      # CI (mobile, admin, rules jobs)
