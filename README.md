@@ -4,8 +4,8 @@ Phambili Ma-Africa (Trading Enterprise) is a professional cleaning company. This
 
 | Component | Folder | Technology | Runs on |
 |-----------|--------|------------|---------|
-| Customer website | `website/` | PHP + vanilla JS + Firebase JS SDK | InfinityFree (`phambilimaafrica.infinityfree.me`) |
-| Mobile app | `mobile/` | Expo React Native (TypeScript) | Android / iOS |
+| Customer website | `website/` | PHP + vanilla JS + Firebase JS SDK | InfinityFree (https://phambilimaafrica.infinityfreeapp.com/index.php) |
+| Mobile app | `mobile/` | Expo React Native (TypeScript) | Android / iOS (installable APK in `apk/`) |
 | Staff dashboard | `admin/` | React + Vite + Tailwind (TypeScript) | Web (desktop) |
 | Backend | `database/` | Firebase Firestore + Auth + security rules | Google Cloud |
 
