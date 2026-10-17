@@ -15,7 +15,10 @@ export interface User {
   phone?: string;
   address?: string;
   isAvailable?: boolean;
+<<<<<<< HEAD
   firstLogin?: boolean;
+=======
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   dateRegistered?: string;
 }
 
@@ -25,6 +28,12 @@ export interface Service {
   description: string;
   price: number;
   isActive: boolean;
+<<<<<<< HEAD
+=======
+  category?: string;
+  duration?: number;
+  imageUrl?: string;
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 }
 
 export interface ServiceRequest {
@@ -33,8 +42,18 @@ export interface ServiceRequest {
   customerId: string;
   customerName?: string;
   customerPhone?: string;
+<<<<<<< HEAD
   serviceId: string;
   serviceName: string;
+=======
+  customerEmail?: string;
+  serviceId: string;
+  serviceName: string;
+  propertyType?: string;
+  cleaningFrequency?: string;
+  specialRequests?: string;
+  duration?: number | null;
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   employeeId?: string;
   employeeName?: string;
   staffId?: string;

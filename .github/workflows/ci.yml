@@ -39,3 +39,24 @@ jobs:
           cache-dependency-path: admin/package-lock.json
       - run: npm ci
       - run: npm run build
+<<<<<<< HEAD
+=======
+
+  rules:
+    name: Firestore security rules (emulator tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: database/rules-tests/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+        working-directory: database/rules-tests
+      - run: npx -y firebase-tools@14 emulators:exec --only firestore --project demo-phambili "npm test --prefix database/rules-tests"
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548

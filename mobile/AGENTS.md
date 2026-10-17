@@ -50,10 +50,17 @@ Docs: https://docs.expo.dev/eas/index.md
 - First `npx expo run:android` build took ~50 min (downloads Gradle/NDK/CMake/Maven); later builds are incremental. Day-to-day: keep `npx expo start --dev-client` running — JS changes hot-reload without native rebuilds.
 - If the emulator system UI ANRs, it's host CPU saturation — wait it out or cold-boot the AVD.
 - Firebase project: `phambili-ma-africa2`. `.env` holds `EXPO_PUBLIC_FIREBASE_*` keys (gitignored via `*.env`).
+<<<<<<< HEAD
 - Seed scripts (one-time, run from `mobile/` with `node`): `seed-services.cjs` (creates 5 docs in `services`), `seed-user.cjs` (creates an employee; override with `USER_EMAIL`/`USER_PASSWORD`). Demo accounts `customer@`, `employee@`, `staff@test.com` all use `Test123!`. Delete the scripts after use.
 - Queries must not combine `where` with `orderBy` on different fields (needs a composite index); sort client-side instead.
 - TypeScript 6 does not auto-load `@types/*`; test globals are declared via `"types": ["jest"]` in `tsconfig.json`.
 - Firestore is in **test mode** — rules expire ~30 days after creation; publish `database/firestore.rules` in the console before then.
+=======
+- Seed data (5 services, demo customer/employee/staff accounts, demo requests in every status) was loaded once and the one-time seed scripts were removed. Demo accounts `customer@`, `employee@`, `staff@test.com` all use `Test123!`. Request refs `PMA-DEMO01` to `PMA-DEMO05` cover every status.
+- Queries must not combine `where` with `orderBy` on different fields (needs a composite index); sort client-side instead.
+- TypeScript 6 does not auto-load `@types/*`; test globals are declared via `"types": ["jest"]` in `tsconfig.json`.
+- Security rules are deployed to `phambili-ma-africa2` (`database/firestore.rules`; redeploy with `firebase deploy --only firestore:rules --project phambili-ma-africa2`). 59 emulator tests live in `database/rules-tests/` and run in CI. New staff/employee accounts must be created in the Firebase Console — the rules block self-registering non-customer roles.
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 - The emulator reaches a host API at `http://10.0.2.2` (already handled in `src/api/client.ts`).
 
 ## Design system

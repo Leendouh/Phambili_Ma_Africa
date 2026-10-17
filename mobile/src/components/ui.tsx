@@ -134,7 +134,15 @@ export function AppHeader({ title, subtitle, children }: AppHeaderProps) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[s.header, { paddingTop: insets.top + spacing.lg }]}>
+<<<<<<< HEAD
       <Text style={s.headerTitle}>{title}</Text>
+=======
+      <View style={s.headerCircleA} />
+      <View style={s.headerCircleB} />
+      <View style={s.headerCircleC} />
+      <Text style={s.headerTitle}>{title}</Text>
+      <View style={s.headerUnderline} />
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       {subtitle && <Text style={s.headerSubtitle}>{subtitle}</Text>}
       {children}
     </View>
@@ -255,17 +263,62 @@ const s = StyleSheet.create({
     paddingBottom: spacing.xl,
     borderBottomLeftRadius: radii.xl + 4,
     borderBottomRightRadius: radii.xl + 4,
+<<<<<<< HEAD
+=======
+    overflow: 'hidden',
+  },
+  headerCircleA: {
+    position: 'absolute',
+    top: -70,
+    right: -50,
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    backgroundColor: 'rgba(217,160,63,0.16)',
+  },
+  headerCircleB: {
+    position: 'absolute',
+    top: 30,
+    right: -90,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(28,143,224,0.14)',
+  },
+  headerCircleC: {
+    position: 'absolute',
+    bottom: -80,
+    left: -60,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: 'rgba(14,159,138,0.12)',
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   },
   headerTitle: {
     fontFamily: fontFamily.heading,
     fontSize: 24,
     color: C.textOnPrimary,
   },
+<<<<<<< HEAD
+=======
+  headerUnderline: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: C.accent,
+    marginTop: 6,
+  },
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   headerSubtitle: {
     fontFamily: fontFamily.body,
     fontSize: 13,
     color: C.textOnPrimaryMuted,
+<<<<<<< HEAD
     marginTop: 4,
+=======
+    marginTop: 6,
+>>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   },
   empty: {
     flex: 1,
