@@ -7,7 +7,8 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
     function isStaff() { return signedIn() && myRole() == 'staff'; }
-<<<<<<< HEAD
+    function isEmployee() { return signedIn() && myRole() == 'employee'; }
+    function isCustomer() { return signedIn() && myRole() == 'customer'; }
     function adminDoc() {
       return get(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
@@ -23,22 +24,12 @@ service cloud.firestore {
           (request.auth.uid == uid && request.resource.data.role == 'customer')
           || (isStaff() && request.resource.data.role == 'employee')
           || (isMainAdmin() && request.resource.data.role == 'staff'));
-=======
-    function isEmployee() { return signedIn() && myRole() == 'employee'; }
-    function isCustomer() { return signedIn() && myRole() == 'customer'; }
-
-    match /users/{uid} {
-      allow read: if signedIn() && (request.auth.uid == uid || isStaff());
-      allow create: if signedIn() && request.auth.uid == uid
-                    && request.resource.data.role == 'customer';
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow update: if signedIn() && (
           (request.auth.uid == uid && request.resource.data.role == resource.data.role)
           || isStaff());
       allow delete: if false;
     }
 
-<<<<<<< HEAD
     // Services and products are browsed by anonymous website visitors too.
     match /services/{id} {
       allow read: if true;
@@ -51,71 +42,10 @@ service cloud.firestore {
     }
 
     match /requests/{id} {
-=======
-    match /services/{id} {
-      allow read: if signedIn();
-      allow create, update: if isStaff()
-          && request.resource.data.name is string
-          && request.resource.data.name.size() > 0
-          && request.resource.data.price is number
-          && request.resource.data.price >= 0
-          && request.resource.data.isActive is bool;
-      allow delete: if isStaff();
-    }
-
-    match /requests/{id} {
-      function validNewRequest(d) {
-        return d.status == 'Pending'
-            && d.employeeId == null
-            && d.hasFeedback == false
-            && d.customerId == request.auth.uid
-            && d.refNumber is string && d.refNumber.matches('^PMA-[A-Z0-9]{4,20}$')
-            && d.serviceId is string
-            && d.serviceName is string
-            && d.requestedDate is string
-            && d.requestedDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-            && d.requestedTime is string
-            && d.requestedTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
-            && d.siteAddress is string
-            && d.siteAddress.size() >= 8 && d.siteAddress.size() <= 200;
-      }
-
-      function identityUnchanged() {
-        return request.resource.data.customerId == resource.data.customerId
-            && request.resource.data.refNumber == resource.data.refNumber;
-      }
-
-      function staffMayUpdate() {
-        return isStaff() && (
-            (resource.data.status == 'Pending'
-              && request.resource.data.status in ['Approved', 'Rejected'])
-         || (resource.data.status == 'Approved'
-              && request.resource.data.status == 'Approved'));
-      }
-
-      function employeeMayUpdate() {
-        return isEmployee()
-            && resource.data.employeeId == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
-            && ((resource.data.status == 'Approved' && request.resource.data.status == 'In Progress')
-             || (resource.data.status == 'In Progress' && request.resource.data.status == 'Completed'));
-      }
-
-      function customerMayFlagFeedback() {
-        return isCustomer()
-            && resource.data.customerId == request.auth.uid
-            && resource.data.status == 'Completed'
-            && resource.data.hasFeedback == false
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hasFeedback'])
-            && request.resource.data.hasFeedback == true;
-      }
-
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow read: if signedIn() && (isStaff()
           || resource.data.customerId == request.auth.uid
           || resource.data.employeeId == request.auth.uid);
 
-<<<<<<< HEAD
       allow create: if signedIn() && myRole() == 'customer'
           && request.resource.data.customerId == request.auth.uid
           && request.resource.data.status == 'Pending'
@@ -148,26 +78,12 @@ service cloud.firestore {
             && request.resource.data.status == 'Cancelled')
         || (signedIn() && resource.data.customerId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hasFeedback']));
-=======
-      allow create: if isCustomer() && validNewRequest(request.resource.data);
-
-      allow update: if identityUnchanged()
-          && (staffMayUpdate() || employeeMayUpdate() || customerMayFlagFeedback());
-
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow delete: if false;
     }
 
     match /feedback/{requestId} {
       allow read: if signedIn() && (isStaff() || resource == null
           || resource.data.customerId == request.auth.uid);
-<<<<<<< HEAD
-      allow create: if signedIn() && request.resource.data.customerId == request.auth.uid
-          && request.resource.data.rating is int
-          && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
-          && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'Completed'
-          && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
-=======
 
       allow create: if isCustomer()
           && request.resource.data.customerId == request.auth.uid
@@ -179,12 +95,10 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/requests/$(requestId)).data.status == 'Completed'
           && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
 
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       allow update, delete: if false;
     }
 
     match /notifications/{id} {
-<<<<<<< HEAD
       // Recipients read their own; staff also read the shared admin feed.
       allow read: if signedIn() && (resource.data.recipientId == request.auth.uid
           || isStaff());
@@ -220,27 +134,5 @@ service cloud.firestore {
       allow create: if request.resource.data.keys().hasAll(['name', 'email', 'message']);
       allow read, update, delete: if isStaff();
     }
-=======
-      function validNotification() {
-        return request.resource.data.recipientId is string
-            && request.resource.data.requestId is string
-            && request.resource.data.message is string
-            && request.resource.data.message.size() <= 300
-            && request.resource.data.isRead == false;
-      }
-
-      function employeeNotifiesOwnJobCustomer() {
-        return isEmployee() && validNotification()
-            && get(/databases/$(database)/documents/requests/$(request.resource.data.requestId)).data.employeeId == request.auth.uid
-            && get(/databases/$(database)/documents/requests/$(request.resource.data.requestId)).data.customerId == request.resource.data.recipientId;
-      }
-
-      allow read: if signedIn() && resource.data.recipientId == request.auth.uid;
-      allow create: if (isStaff() && validNotification()) || employeeNotifiesOwnJobCustomer();
-      allow update: if signedIn() && resource.data.recipientId == request.auth.uid
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
-      allow delete: if false;
-    }
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   }
 }

@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import React, { useEffect, useState } from 'react';
-=======
 import React, { useEffect, useMemo, useState } from 'react';
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 import {
   View,
   Text,
@@ -10,18 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
-<<<<<<< HEAD
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-=======
   TextInput,
   Image,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { collection, onSnapshot } from 'firebase/firestore';
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 import { db } from '../../firebase';
 import { useAuth } from '../../context/AuthContext';
 import { Service } from '../../types';
@@ -36,8 +26,6 @@ interface Props {
   navigation: any;
 }
 
-<<<<<<< HEAD
-=======
 const formatDuration = (minutes?: number) => {
   if (!minutes) return 'Flexible';
   if (minutes < 60) return `${minutes} min`;
@@ -61,26 +49,11 @@ const badgeFor = (name: string) => {
   return null;
 };
 
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 export default function ServicesScreen({ navigation }: Props) {
   const { userProfile } = useAuth();
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-<<<<<<< HEAD
-
-  useEffect(() => {
-    const q = query(collection(db, 'services'), where('isActive', '==', true));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const servicesData: Service[] = [];
-      snapshot.forEach((doc) => {
-        servicesData.push({
-          id: doc.id,
-          ...doc.data(),
-        } as Service);
-      });
-=======
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
 
@@ -91,7 +64,6 @@ export default function ServicesScreen({ navigation }: Props) {
         servicesData.push({ id: doc.id, ...doc.data() } as Service);
       });
       servicesData.sort((a, b) => a.name.localeCompare(b.name));
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
       setServices(servicesData);
       setLoading(false);
       setRefreshing(false);
@@ -104,8 +76,6 @@ export default function ServicesScreen({ navigation }: Props) {
     return () => unsubscribe();
   }, []);
 
-<<<<<<< HEAD
-=======
   const categories = useMemo(() => {
     const cats = new Set<string>();
     services.forEach((s) => cats.add(s.category || 'General'));
@@ -123,34 +93,10 @@ export default function ServicesScreen({ navigation }: Props) {
     });
   }, [services, search, category]);
 
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   const onRefresh = () => {
     setRefreshing(true);
   };
 
-<<<<<<< HEAD
-  const renderService = ({ item }: { item: Service }) => (
-    <TouchableOpacity
-      style={styles.serviceCard}
-      activeOpacity={0.8}
-      onPress={() => navigation.navigate('NewRequest', { service: item })}
-    >
-      <View style={styles.iconWrap}>
-        <Ionicons name="construct-outline" size={22} color={C.primary} />
-      </View>
-      <View style={styles.serviceInfo}>
-        <Text style={styles.serviceName}>{item.name}</Text>
-        <Text style={styles.serviceDescription} numberOfLines={2}>
-          {item.description}
-        </Text>
-        <Text style={styles.servicePrice}>R {item.price.toFixed(2)}</Text>
-      </View>
-      <View style={styles.chevronWrap}>
-        <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
-      </View>
-    </TouchableOpacity>
-  );
-=======
   const renderService = ({ item }: { item: Service }) => {
     const unavailable = !item.isActive;
     const catStyle = CATEGORY_STYLE[item.category || ''] || DEFAULT_CAT_STYLE;
@@ -234,7 +180,6 @@ export default function ServicesScreen({ navigation }: Props) {
       </View>
     );
   };
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
 
   if (loading) {
     return <LoadingScreen />;
@@ -243,23 +188,6 @@ export default function ServicesScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <AppHeader
-<<<<<<< HEAD
-        title={userProfile ? `Hello, ${userProfile.firstName}` : 'Services'}
-        subtitle="What can we help you with today?"
-      />
-
-      <FlatList
-        data={services}
-        renderItem={renderService}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={<Text style={styles.sectionHeading}>Available services</Text>}
-        ListEmptyComponent={
-          <EmptyState
-            icon="briefcase-outline"
-            title="No services available"
-            message="Please check back later."
-=======
         title={userProfile ? `Hello, ${userProfile.firstName}` : 'Our Services'}
         subtitle="Discover the range of professional services we offer"
       />
@@ -325,7 +253,6 @@ export default function ServicesScreen({ navigation }: Props) {
             icon="search-outline"
             title="No Services Found"
             message="We couldn't find any services matching your criteria. Try adjusting your search or filters."
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
           />
         }
         refreshControl={
@@ -345,44 +272,13 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     flexGrow: 1,
   },
-<<<<<<< HEAD
-  sectionHeading: {
-    fontFamily: fontFamily.headingMedium,
-    fontSize: 16,
-    color: C.text,
-    marginBottom: spacing.lg,
-  },
-  serviceCard: {
-=======
   searchBox: {
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: C.surface,
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: C.border,
-<<<<<<< HEAD
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    ...shadows.card,
-  },
-  iconWrap: {
-    width: 46,
-    height: 46,
-    borderRadius: radii.md,
-    backgroundColor: C.neutralTint,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.md,
-  },
-  serviceInfo: {
-    flex: 1,
-  },
-  serviceName: {
-    fontFamily: fontFamily.headingMedium,
-    fontSize: 15,
-=======
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
     gap: spacing.sm,
@@ -498,25 +394,12 @@ const styles = StyleSheet.create({
   serviceName: {
     fontFamily: fontFamily.heading,
     fontSize: 16,
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
     color: C.text,
   },
   serviceDescription: {
     fontFamily: fontFamily.body,
     fontSize: 12.5,
     color: C.textLight,
-<<<<<<< HEAD
-    marginTop: 2,
-  },
-  servicePrice: {
-    fontFamily: fontFamily.headingMedium,
-    fontSize: 14,
-    color: C.accent,
-    marginTop: 6,
-  },
-  chevronWrap: {
-    marginLeft: spacing.sm,
-=======
     lineHeight: 18,
     marginTop: 4,
     minHeight: 36,
@@ -599,6 +482,5 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.bodyBold,
     fontSize: 13,
     color: C.primary,
->>>>>>> 6f19b56de913460717b19fe32251bb23c912f548
   },
 });
