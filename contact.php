@@ -1,33 +1,3 @@
-<?php
-// Start session and include database connection
-require_once 'includes/config_session.inc.php';
-require_once 'includes/dbh.inc.php';
-
-// Get user data if logged in
-$user_id = $_SESSION['user_id'] ?? null;
-$user_name = $_SESSION['user_name'] ?? '';
-$user_role = $_SESSION['user_role'] ?? '';
-
-// Check user login status
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-$user_email = $_SESSION['user_email'] ?? '';
-
-// Fetch notifications for customer
-$notifications = [];
-$unreadCount = 0;
-if ($is_customer && $user_id) {
-    require_once 'includes/notifications_model.inc.php';
-    $notifications = get_notifications($pdo, $user_id, 'customer', true, 5);
-    $unreadCount = get_unread_notification_count($pdo, $user_id, 'customer');
-}
-
-// Get cart count from session or localStorage (will be handled by JS)
-$cart_count = 0;
-
-?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -58,7 +28,7 @@ $cart_count = 0;
     <link rel="stylesheet" href="./css/social-media.css">
     </head>
 
-    <body data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+    <body">
 
         <!-- Updated Header Section -->
         <header class="header">
@@ -76,14 +46,9 @@ $cart_count = 0;
 
             <!-- Icons (Right) -->
             <div class="header-icons">
-                <?php if ($is_customer && $user_id): ?>
-                <!-- Notification Bell -->
-                <div class="notification-bell-customer">
+                <div class="notification-bell-customer" data-auth="role:customer">
                     <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
                         <i class="fas fa-bell"></i>
-                        <?php if ($unreadCount > 0): ?>
-                            <span class="notification-badge-customer"><?php echo $unreadCount; ?></span>
-                        <?php endif; ?>
                     </button>
                     <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
                         <div class="notification-dropdown-header">
@@ -91,92 +56,69 @@ $cart_count = 0;
                             <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
                         </div>
                         <div class="notification-dropdown-content">
-                            <?php if (empty($notifications)): ?>
-                                <div class="no-notifications">
-                                    <i class="fas fa-bell-slash"></i>
-                                    <p>No new notifications</p>
-                                </div>
-                            <?php else: ?>
-                                <?php foreach ($notifications as $notif): ?>
-                                    <div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
-                                        <div class="notif-content">
-                                            <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                            <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                            <small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                                        </div>
-                                        <button class="notif-close" onclick="markCustomerNotificationRead(<?php echo $notif['ID']; ?>)">
-                                            <i class="fas fa-times"></i>
-                                        </button>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
+                            <div class="no-notifications">
+                                <i class="fas fa-bell-slash"></i>
+                                <p>No new notifications</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <?php endif; ?>
-                <?php if ($is_logged_in): ?>
-                    <!-- User Profile Dropdown (shown when logged in) -->
-                    <div class="user-profile-dropdown" id="user-profile-dropdown">
-                        <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
-                            <img src="images/user.png" alt="User" class="icon" id="user-icon">
-                        </button>
-                        <div class="profile-dropdown-menu" id="profile-dropdown-menu">
-                            <?php if ($is_admin): ?>
-                                <!-- Admin Profile Dropdown -->
-                                <div class="profile-dropdown-header">
-                                    <i class="fas fa-user-shield admin-icon"></i>
-                                    <div class="profile-info">
-                                        <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Administrator'); ?></span>
-                                        <span class="profile-role">Admin</span>
-                                    </div>
+                <div class="user-profile-dropdown" id="user-profile-dropdown" data-auth="in">
+                    <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
+                        <img src="images/user.png" alt="User" class="icon" id="user-icon">
+                    </button>
+                    <div class="profile-dropdown-menu" id="profile-dropdown-menu">
+                        <div data-auth="role:staff,admin,main_admin,super_admin">
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user-shield admin-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name" data-user-name>Administrator</span>
+                                    <span class="profile-role">Admin</span>
                                 </div>
-                                <div class="profile-dropdown-links">
-                                    <a href="admin_dashboard.php" class="dropdown-link">
-                                        <i class="fas fa-tachometer-alt"></i>
-                                        Admin Dashboard
-                                    </a>
-                                    <a href="includes/logout.inc.php" class="dropdown-link logout-link">
-                                        <i class="fas fa-sign-out-alt"></i>
-                                        Log Out
-                                    </a>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="#" class="dropdown-link admin-app-link">
+                                    <i class="fas fa-tachometer-alt"></i>
+                                    Admin Dashboard
+                                </a>
+                                <a href="#" class="dropdown-link logout-link" data-logout>
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
+                        </div>
+                        <div data-auth="role:customer">
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user customer-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name" data-user-name>Customer</span>
+                                    <span class="profile-role">Customer</span>
                                 </div>
-                            <?php elseif ($is_customer): ?>
-                                <!-- Customer Profile Dropdown -->
-                                <div class="profile-dropdown-header">
-                                    <i class="fas fa-user customer-icon"></i>
-                                    <div class="profile-info">
-                                        <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Customer'); ?></span>
-                                        <span class="profile-role">Customer</span>
-                                    </div>
-                                </div>
-                                <div class="profile-dropdown-links">
-                                    <a href="bookings.php" class="dropdown-link">
-                                        <i class="fas fa-calendar-check"></i>
-                                        Bookings
-                                    </a>
-                                    <a href="profile.php" class="dropdown-link">
-                                        <i class="fas fa-user"></i>
-                                        Profile
-                                    </a>
-                                    <a href="includes/logout.inc.php" class="dropdown-link logout-link">
-                                        <i class="fas fa-sign-out-alt"></i>
-                                        Log Out
-                                    </a>
-                                </div>
-                            <?php endif; ?>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="bookings.php" class="dropdown-link">
+                                    <i class="fas fa-calendar-check"></i>
+                                    Bookings
+                                </a>
+                                <a href="profile.php" class="dropdown-link">
+                                    <i class="fas fa-user"></i>
+                                    Profile
+                                </a>
+                                <a href="#" class="dropdown-link logout-link" data-logout>
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
                         </div>
                     </div>
-                <?php else: ?>
-                    <!-- Guest: Icon redirects to login page -->
-                    <a href="login.php" class="icon-link" aria-label="Login/Register">
-                        <img src="images/user.png" alt="Login" class="icon">
-                    </a>
-                <?php endif; ?>
+                </div>
+                <!-- Guest: Icon redirects to login page -->
+                <a href="login.php" class="icon-link" aria-label="Login/Register" data-auth="out">
+                    <img src="images/user.png" alt="Login" class="icon">
+                </a>
                 <button class="cart-btn" id="cart-btn" aria-label="Shopping Cart">
                     <img src="images/shopping-bag.png" alt="" class="icon">
-                    <?php if (isset($_SESSION["user_id"])): ?>
-                        <span class="cart-badge">0</span>
-                    <?php endif; ?>
+                    <span class="cart-badge" data-auth="in">0</span>
                 </button>
             </div>
         </header>
@@ -206,37 +148,30 @@ $cart_count = 0;
                 <li class="nav-item"><a href="products.php" class="nav-link"> Products</a></li>
 
                 <!-- Dynamic navigation based on role -->
-                <?php if ($is_admin): ?>
-                    <!-- Admin sees Admin Dashboard link instead of Login -->
-                    <li class="nav-item">
-                        <a href="admin_dashboard.php" class="nav-link admin-nav-link">
-                            Admin Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
-                    </li>
-                <?php elseif ($is_customer): ?>
-                    <!-- Customer sees Profile and Logout -->
-                    <li class="nav-item">
-                        <a href="bookings.php" class="nav-link">
-                            Bookings
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="profile.php" class="nav-link">
-                            Profile
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
-                    </li>
-                <?php else: ?>
-                    <!-- Guest sees Login -->
-                    <li class="nav-item">
-                        <a href="login.php" class="nav-link"> Log In</a>
-                    </li>
-                <?php endif; ?>
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link admin-nav-link admin-app-link">
+                        Admin Dashboard
+                    </a>
+                </li>
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
+                </li>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="bookings.php" class="nav-link">
+                        Bookings
+                    </a>
+                </li>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="profile.php" class="nav-link">
+                        Profile
+                    </a>
+                </li>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
+                </li>
+                <li class="nav-item" data-auth="out">
+                    <a href="login.php" class="nav-link"> Log In</a>
+                </li>
 
                 <li class="nav-item">
                     <a href="booking.php" class="nav-link book-now-btn ">
@@ -386,31 +321,15 @@ $cart_count = 0;
                                         different from other services.</span>
                                 </div>
 
-                                <?php if (isset($_SESSION['contact_success'])): ?>
-                                    <div class="contact-success-message">
-                                        <?php echo htmlspecialchars($_SESSION['contact_success']); ?>
-                                    </div>
-                                    <?php unset($_SESSION['contact_success']); ?>
-                                <?php endif; ?>
-
-                                <?php if (isset($_SESSION['contact_error'])): ?>
-                                    <div class="contact-error-message">
-                                        <?php echo htmlspecialchars($_SESSION['contact_error']); ?>
-                                    </div>
-                                    <?php unset($_SESSION['contact_error']); ?>
-                                <?php endif; ?>
-
-                                <form id="contact" action="includes/contact_handler.php" method="post">
+                                <form id="contact">
                                     <div class="contact-form-row">
                                         <div class="contact-form-group">
                                             <input class="contact-input" name="name" type="text" id="contact-name"
-                                                placeholder="Your full name" required
-                                                value="<?php echo htmlspecialchars($user_name ?? ''); ?>">
+                                                placeholder="Your full name" required>
                                         </div>
                                         <div class="contact-form-group">
                                             <input class="contact-input" name="email" type="email" id="contact-email"
-                                                placeholder="your@email.com" required
-                                                value="<?php echo htmlspecialchars($user_email ?? ''); ?>">
+                                                placeholder="your@email.com" required>
                                         </div>
                                     </div>
                                     <div class="contact-form-group">
@@ -591,82 +510,6 @@ $cart_count = 0;
     </footer>
 
     <script src="./js/script.js"></script>
-    <script src="./js/form-validation.js"></script>
-    <script>
-        // Customer notification dropdown functionality
-        function toggleCustomerNotificationDropdown() {
-            const dropdown = document.getElementById('notificationDropdownCustomer');
-            if (dropdown) {
-                dropdown.classList.toggle('active');
-            }
-        }
-
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const notificationBell = document.querySelector('.notification-bell-customer');
-            if (notificationBell && !notificationBell.contains(event.target)) {
-                const dropdown = document.getElementById('notificationDropdownCustomer');
-                if (dropdown) {
-                    dropdown.classList.remove('active');
-                }
-            }
-        });
-
-        // Mark individual notification as read
-        async function markCustomerNotificationRead(notificationId) {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_read', notification_id: notificationId })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
-                    if (notifItem) {
-                        notifItem.style.opacity = '0';
-                        setTimeout(() => notifItem.remove(), 300);
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        const currentCount = parseInt(badge.textContent);
-                        if (currentCount > 1) {
-                            badge.textContent = currentCount - 1;
-                        } else {
-                            badge.remove();
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
-
-        // Mark all notifications as read
-        async function markAllCustomerNotificationsRead() {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'mark_all_read' })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const dropdownContent = document.querySelector('.notification-dropdown-customer .notification-dropdown-content');
-                    if (dropdownContent) {
-                        dropdownContent.innerHTML = '<div class="no-notifications"><i class="fas fa-bell-slash"></i><p>No new notifications</p></div>';
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        badge.remove();
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
-    </script>
-
     <script>
         // Contact Form EmailJS Integration
         document.addEventListener('DOMContentLoaded', function() {
@@ -699,32 +542,14 @@ $cart_count = 0;
                     // Send email via EmailJS first
                     const emailSent = await sendContactEmailJS(name, email, phone, message);
 
-                    // Submit to PHP backend to save the message
-                    const formData = new FormData(contactForm);
-
                     try {
-                        const response = await fetch('includes/contact_handler.php', {
-                            method: 'POST',
-                            headers: {
-                                'X-Requested-With': 'XMLHttpRequest',
-                                'Accept': 'application/json'
-                            },
-                            body: formData
-                        });
-
-                        const result = await response.json();
-
-                        if (result.success) {
-                            // Both EmailJS and PHP succeeded
-                            showContactMessage('Your message has been sent successfully! We will get back to you soon.', 'success');
-                            contactForm.reset();
-                        } else {
-                            // PHP returned error
-                            showContactMessage(result.message || 'Failed to send your message. Please try again.', 'error');
-                        }
+                        // Save the message to Firestore for the admin dashboard
+                        await window.pmaSaveContactMessage({ name, email, phone, message });
+                        showContactMessage('Your message has been sent successfully! We will get back to you soon.', 'success');
+                        contactForm.reset();
                     } catch (error) {
                         console.error('Contact form error:', error);
-                        // If EmailJS succeeded but PHP fetch failed, still show success
+                        // If EmailJS succeeded but the save failed, still show success
                         if (emailSent) {
                             showContactMessage('Your message has been sent successfully! We will get back to you soon.', 'success');
                             contactForm.reset();
@@ -811,16 +636,35 @@ $cart_count = 0;
         }
     </script>
 
+    <script src="./js/config.js"></script>
     <!-- EmailJS SDK for sending contact form emails -->
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <script src="js/config.js?v=<?php echo time(); ?>"></script>
     <script>
         // Initialize EmailJS with your public key
         (function() {
             if (window.CONFIG && window.CONFIG.EMAILJS && window.CONFIG.EMAILJS.PUBLIC_KEY) {
                 emailjs.init(window.CONFIG.EMAILJS.PUBLIC_KEY);
-                console.log('EmailJS initialized for contact page');
             }
         })();
+    </script>
+    <script type="module" src="./js/firebase/ui.js"></script>
+    <script type="module" src="./js/firebase/notifications.js"></script>
+    <script type="module">
+        import { saveContactMessage } from './js/firebase/data.js';
+        import { onAuth } from './js/firebase/auth.js';
+
+        // Bridge: classic-script contact form calls this
+        window.pmaSaveContactMessage = saveContactMessage;
+
+        // Pre-fill name/email for signed-in users
+        onAuth(({ profile }) => {
+            if (profile) {
+                const name = `${profile.firstName || ''} ${profile.lastName || ''}`.trim();
+                const nameInput = document.getElementById('contact-name');
+                const emailInput = document.getElementById('contact-email');
+                if (nameInput && name) nameInput.value = name;
+                if (emailInput && profile.email) emailInput.value = profile.email;
+            }
+        });
     </script>
 </html>

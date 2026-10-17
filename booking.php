@@ -1,401 +1,3 @@
-<?php
-// Start session and include database connection
-require_once 'includes/config_session.inc.php';
-require_once 'includes/dbh.inc.php';
-
-// Check if user is logged in - redirect to login if not
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit();
-}
-
-// Get user data if logged in
-$user_id = $_SESSION['user_id'] ?? null;
-$user_name = $_SESSION['user_name'] ?? '';
-$user_role = $_SESSION['user_role'] ?? '';
-$user_email = $_SESSION['user_email'] ?? '';
-
-// Check user login status
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-
-// Get cart count from session or localStorage (will be handled by JS)
-$cart_count = 0;
-
-// Load customer data for prefilling form fields
-$user_address_street = '';
-$user_address_city = '';
-$user_address_state = '';
-$user_address_postal = '';
-
-if ($user_id) {
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM customers WHERE ID = ?");
-        $stmt->execute([$user_id]);
-        $user_data = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($user_data) {
-            $user_email = $user_data['Email'] ?? '';
-            $user_phone = $user_data['Phone'] ?? '';
-
-            // Parse address from single field (comma-separated: Street, City, State, Postal)
-            $address = $user_data['Address'] ?? '';
-            if ($address) {
-                $address_parts = array_map('trim', explode(',', $address));
-                $user_address_street = $address_parts[0] ?? '';
-                $user_address_city = $address_parts[1] ?? '';
-                $user_address_state = $address_parts[2] ?? '';
-                $user_address_postal = $address_parts[3] ?? '';
-            }
-        }
-    } catch (PDOException $e) {
-        error_log("Error fetching user data: " . $e->getMessage());
-    }
-}
-
-// Handle form submission
-$booking_success = false;
-$booking_error = '';
-$form_data = [];
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // AJAX check for duplicate booking
-    if (isset($_POST['check_duplicate'])) {
-        header('Content-Type: application/json');
-        $check_service_id = filter_input(INPUT_POST, 'service_id', FILTER_SANITIZE_NUMBER_INT);
-        $check_date = filter_input(INPUT_POST, 'booking_date', FILTER_SANITIZE_STRING);
-        
-        $duplicate = false;
-        if ($user_id && $check_service_id && $check_date) {
-            try {
-                $check_stmt = $pdo->prepare("
-                    SELECT COUNT(*) FROM bookings 
-                    WHERE Customer_ID = ? AND Service_ID = ? AND Date = ?
-                    AND Status != 'cancelled'
-                ");
-                $check_stmt->execute([$user_id, $check_service_id, $check_date]);
-                $duplicate = ($check_stmt->fetchColumn() > 0);
-            } catch (PDOException $e) {
-                error_log("Duplicate check error: " . $e->getMessage());
-            }
-        }
-        
-        echo json_encode(['duplicate' => $duplicate]);
-        exit;
-    }
-    
-    // Sanitize and validate form data
-    $form_data = [
-        'service_type' => filter_input(INPUT_POST, 'service-type', FILTER_SANITIZE_NUMBER_INT),
-        'property_type' => filter_input(INPUT_POST, 'property-type', FILTER_SANITIZE_STRING),
-        'cleaning_frequency' => filter_input(INPUT_POST, 'cleaning-frequency', FILTER_SANITIZE_STRING),
-        'booking_date' => filter_input(INPUT_POST, 'booking-date', FILTER_SANITIZE_STRING),
-        'booking_time' => filter_input(INPUT_POST, 'booking-time', FILTER_SANITIZE_STRING),
-        'address_street' => filter_input(INPUT_POST, 'address-street', FILTER_SANITIZE_STRING),
-        'address_city' => filter_input(INPUT_POST, 'address-city', FILTER_SANITIZE_STRING),
-        'address_state' => filter_input(INPUT_POST, 'address-state', FILTER_SANITIZE_STRING),
-        'address_postal_code' => filter_input(INPUT_POST, 'address-postal-code', FILTER_SANITIZE_STRING),
-        'customer_name' => filter_input(INPUT_POST, 'customer-name', FILTER_SANITIZE_STRING),
-        'customer_email' => filter_input(INPUT_POST, 'customer-email', FILTER_SANITIZE_EMAIL),
-        'customer_phone' => filter_input(INPUT_POST, 'customer-phone', FILTER_SANITIZE_STRING),
-        'special_requests' => filter_input(INPUT_POST, 'special-requests', FILTER_SANITIZE_STRING)
-    ];
-
-    // Validate CSRF token (disabled due to session issues on localhost)
-    // if (!validateCSRFRequest()) {
-    //     $errors[] = 'Security validation failed. Please refresh the page and try again.';
-    // }
-
-    // Validate required fields
-    $errors = [];
-    
-    if (empty($form_data['service_type'])) {
-        $errors[] = 'Please select a service';
-    }
-    
-    if (empty($form_data['property_type'])) {
-        $errors[] = 'Please select a property type';
-    }
-    
-    if (empty($form_data['booking_date'])) {
-        $errors[] = 'Please select a booking date';
-    }
-    
-    if (empty($form_data['booking_time'])) {
-        $errors[] = 'Please select a booking time';
-    }
-    
-    if (empty($form_data['address_street'])) {
-        $errors[] = 'Please enter your street address';
-    }
-    
-    if (empty($form_data['address_city'])) {
-        $errors[] = 'Please enter your city';
-    }
-    
-    if (empty($form_data['address_state'])) {
-        $errors[] = 'Please enter your state';
-    }
-    
-    if (empty($form_data['address_postal_code'])) {
-        $errors[] = 'Please enter your postal code';
-    }
-    
-    if (empty($form_data['customer_name'])) {
-        $errors[] = 'Please enter your full name';
-    }
-    
-    if (empty($form_data['customer_email'])) {
-        $errors[] = 'Please enter your email address';
-    }
-    
-    if (empty($form_data['customer_phone'])) {
-        $errors[] = 'Please enter your phone number';
-    }
-
-    // Validate email format - strict validation
-    if (!empty($form_data['customer_email'])) {
-        if (!filter_var($form_data['customer_email'], FILTER_VALIDATE_EMAIL)) {
-            $errors[] = 'Please enter a valid email address (e.g., name@example.com)';
-        } elseif (strlen($form_data['customer_email']) > 254) {
-            $errors[] = 'Email address is too long';
-        }
-    }
-
-    // Validate phone number - strict: exactly 10 digits, only numbers, South African format
-    if (!empty($form_data['customer_phone'])) {
-        // Remove all non-digit characters
-        $phone = preg_replace('/\D/', '', $form_data['customer_phone']);
-        
-        // Check for any non-numeric characters in original input
-        if (!ctype_digit($phone)) {
-            $errors[] = 'Phone number must contain only digits (0-9), no letters or special characters';
-        } elseif (strlen($phone) !== 10) {
-            $errors[] = 'Phone number must be exactly 10 digits';
-        } elseif (!preg_match('/^0[0-9]{9}$/', $phone)) {
-            $errors[] = 'Phone number must start with 0 followed by 9 digits (e.g., 0821234567)';
-        }
-    }
-
-    // Validate postal code (4 digits)
-    if (!empty($form_data['address_postal_code'])) {
-        $postal = preg_replace('/\D/', '', $form_data['address_postal_code']);
-        if (!ctype_digit($postal) || strlen($postal) !== 4) {
-            $errors[] = 'Postal code must be exactly 4 digits (e.g., 2000)';
-        }
-    }
-
-    // Strict address validation - all fields must be provided
-    if (empty($form_data['address_street']) || trim($form_data['address_street']) === '') {
-        $errors[] = 'Street address is required';
-    }
-    if (empty($form_data['address_city']) || trim($form_data['address_city']) === '') {
-        $errors[] = 'City is required';
-    }
-    if (empty($form_data['address_state']) || trim($form_data['address_state']) === '') {
-        $errors[] = 'State/Province is required';
-    }
-    if (empty($form_data['address_postal_code']) || trim($form_data['address_postal_code']) === '') {
-        $errors[] = 'Postal code is required';
-    }
-
-    // Date/Time validation
-    if (!empty($form_data['booking_date']) && !empty($form_data['booking_time'])) {
-        $today = date('Y-m-d');
-        $current_time = date('H:i');
-        $current_hour = (int)date('H');
-        
-        $booking_date = $form_data['booking_date'];
-        $booking_time = $form_data['booking_time'];
-        $booking_timestamp = strtotime($booking_date . ' ' . $booking_time);
-        $current_timestamp = time();
-        
-        // Check if booking date is in past
-        if ($booking_date < $today) {
-            $errors[] = 'Booking date cannot be in the past';
-        }
-        
-        // Check if booking time has already passed for today
-        if ($booking_date === $today && $booking_time <= $current_time) {
-            $errors[] = 'Cannot book for past times. Please select a future time.';
-        }
-        
-        // Same-day booking restriction: must book before 12 PM
-        if ($booking_date === $today && $current_hour >= 12) {
-            $tomorrow = date('Y-m-d', strtotime('+1 day'));
-            $errors[] = "Same-day bookings must be made before 12:00 PM. Please select {$tomorrow} or later.";
-        }
-    }
-
-    // If no errors, proceed with booking
-    if (empty($errors)) {
-        try {
-            // Get service details
-            $service_query = "SELECT * FROM services WHERE ID = ? AND Is_Available = 1";
-            $service_stmt = $pdo->prepare($service_query);
-            $service_stmt->execute([$form_data['service_type']]);
-            $service = $service_stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$service) {
-                $errors[] = 'Selected service is not available';
-            } else {
-                // Check for duplicate booking (same customer, same service, same day)
-                if ($user_id) {
-                    // Debug: Log the values being checked
-                    error_log("Checking duplicate for user_id: $user_id, service_type: {$form_data['service_type']}, date: {$form_data['booking_date']}");
-                    
-                    $check_stmt = $pdo->prepare("
-                        SELECT COUNT(*) FROM bookings 
-                        WHERE Customer_ID = ? AND Service_ID = ? AND Date = ?
-                        AND Status != 'cancelled'
-                    ");
-                    $check_stmt->execute([$user_id, $form_data['service_type'], $form_data['booking_date']]);
-                    $existing_count = $check_stmt->fetchColumn();
-                    
-                    error_log("Found $existing_count existing bookings");
-
-                    if ($existing_count > 0) {
-                        $errors[] = "You have already booked this service for " . date('F j, Y', strtotime($form_data['booking_date'])) . ". Please select a different date or service.";
-                    }
-                } else {
-                    // Debug: Log the values being checked for guest
-                    error_log("Checking duplicate for guest email: {$form_data['customer_email']}, phone: {$form_data['customer_phone']}, service_type: {$form_data['service_type']}, date: {$form_data['booking_date']}");
-                    
-                    // For guest users, check by email and phone
-                    $check_stmt = $pdo->prepare("
-                        SELECT COUNT(*) FROM bookings b
-                        LEFT JOIN customers c ON b.Customer_ID = c.ID
-                        WHERE (c.Email = ? OR c.Phone = ?) AND b.Service_ID = ? AND b.Date = ?
-                        AND b.Status != 'cancelled'
-                    ");
-                    $check_stmt->execute([
-                        $form_data['customer_email'], 
-                        $form_data['customer_phone'], 
-                        $form_data['service_type'], 
-                        $form_data['booking_date']
-                    ]);
-                    $existing_count = $check_stmt->fetchColumn();
-                    
-                    error_log("Found $existing_count existing bookings for guest");
-
-                    if ($existing_count > 0) {
-                        $errors[] = "You have already booked this service for " . date('F j, Y', strtotime($form_data['booking_date'])) . ". Please select a different date or service.";
-                    }
-                }
-                
-                // Only proceed with INSERT if no duplicate was found
-                if (empty($errors)) {
-                    // Combine address
-                    $address = trim($form_data['address_street'] . ', ' . 
-                               $form_data['address_city'] . ', ' . 
-                               $form_data['address_state'] . ' ' . 
-                               $form_data['address_postal_code']);
-
-                    // Insert booking
-                    $booking_query = "INSERT INTO bookings (
-                        Customer_ID, 
-                        Service_ID, 
-                        Date, 
-                        Time, 
-                        Status, 
-                        Address, 
-                        Special_Instructions, 
-                        Duration, 
-                        Property_Type, 
-                        Cleaning_Frequency,
-                        created_at,
-                        updated_at
-                    ) VALUES (?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, NOW(), NOW())";
-
-                    $booking_stmt = $pdo->prepare($booking_query);
-                    
-                    $booking_success = $booking_stmt->execute([
-                        $user_id ?: null, // Allow guest bookings
-                        $form_data['service_type'],
-                        $form_data['booking_date'],
-                        $form_data['booking_time'],
-                        $address,
-                        $form_data['special_requests'] ?: null,
-                        $service['Duration'],
-                        $form_data['property_type'],
-                        $form_data['cleaning_frequency'] ?: 'once'
-                    ]);
-
-                    if (!$booking_success) {
-                        $errors[] = 'Failed to create booking. Please try again.';
-                    } else {
-                        // Update customer profile with phone and address from booking
-                        if ($user_id) {
-                            try {
-                                // Clean phone number - digits only
-                                $clean_phone = preg_replace('/\D/', '', $form_data['customer_phone']);
-                                // Format address as comma-separated string
-                                $profile_address = trim($form_data['address_street'] . ', ' . 
-                                                     $form_data['address_city'] . ', ' . 
-                                                     $form_data['address_state'] . ' ' . 
-                                                     $form_data['address_postal_code']);
-                                
-                                $update_stmt = $pdo->prepare("
-                                    UPDATE customers 
-                                    SET Phone = :phone, Address = :address, updatedAt = NOW()
-                                    WHERE ID = :id
-                                ");
-                                $update_stmt->execute([
-                                    ':phone' => $clean_phone,
-                                    ':address' => $profile_address,
-                                    ':id' => $user_id
-                                ]);
-                            } catch (PDOException $e) {
-                                // Log error but don't fail booking if profile update fails
-                                error_log("Failed to update customer profile after booking: " . $e->getMessage());
-                            }
-                        }
-                        
-                        // Notify all admins about new booking
-                        require_once 'includes/notifications_model.inc.php';
-                        $booking_id = $pdo->lastInsertId();
-                        
-                        // Get all admins
-                        $admins_query = "SELECT ID, Full_Name FROM admins";
-                        $admins_stmt = $pdo->prepare($admins_query);
-                        $admins_stmt->execute();
-                        $admins = $admins_stmt->fetchAll(PDO::FETCH_ASSOC);
-                        
-                        foreach ($admins as $admin) {
-                            create_notification(
-                                $pdo,
-                                $admin['ID'],
-                                'admin',
-                                'New Booking Received',
-                                "A new booking (#{$booking_id}) has been submitted. Please review it in the dashboard.",
-                                'booking'
-                            );
-                        }
-                    }
-                }
-            }
-        } catch (PDOException $e) {
-            $errors[] = 'Database error: ' . $e->getMessage();
-        }
-    }
-
-    if (!empty($errors)) {
-        $booking_error = implode('<br>', $errors);
-    }
-}
-
-// Fetch available services from database
-try {
-    $services_query = "SELECT * FROM services WHERE Is_Available = 1 ORDER BY Category, Name";
-    $services_stmt = $pdo->prepare($services_query);
-    $services_stmt->execute();
-    $services = $services_stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    $services = [];
-    $booking_error = 'Unable to load services. Please try again later.';
-}
-?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -426,7 +28,7 @@ try {
     <link rel="stylesheet" href="./css/social-media.css">
 </head>
 
-<body data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+<body">
     <!-- Updated Header Section -->
     <header class="header">
         <!-- Hamburger Menu Button -->
@@ -443,38 +45,52 @@ try {
 
         <!-- Icons (Right) -->
         <div class="header-icons">
-            <?php if ($is_logged_in): ?>
-                <!-- User Profile Dropdown (shown when logged in) -->
-                <div class="user-profile-dropdown" id="user-profile-dropdown">
+            <div class="notification-bell-customer" data-auth="role:customer">
+                <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
+                    <i class="fas fa-bell"></i>
+                </button>
+                <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
+                    <div class="notification-dropdown-header">
+                        <h4>Notifications</h4>
+                        <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
+                    </div>
+                    <div class="notification-dropdown-content">
+                        <div class="no-notifications">
+                            <i class="fas fa-bell-slash"></i>
+                            <p>No new notifications</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="user-profile-dropdown" id="user-profile-dropdown" data-auth="in">
                     <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
                         <img src="images/user.png" alt="User" class="icon" id="user-icon">
                     </button>
                     <div class="profile-dropdown-menu" id="profile-dropdown-menu">
-                        <?php if ($is_admin): ?>
-                            <!-- Admin Profile Dropdown -->
+                        <div data-auth="role:staff,admin,main_admin,super_admin">
                             <div class="profile-dropdown-header">
                                 <i class="fas fa-user-shield admin-icon"></i>
                                 <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($user_name ?? 'Administrator'); ?></span>
+                                    <span class="profile-name" data-user-name>Administrator</span>
                                     <span class="profile-role">Admin</span>
                                 </div>
                             </div>
                             <div class="profile-dropdown-links">
-                                <a href="admin_dashboard.php" class="dropdown-link">
+                                <a href="#" class="dropdown-link admin-app-link">
                                     <i class="fas fa-tachometer-alt"></i>
                                     Admin Dashboard
                                 </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                <a href="#" class="dropdown-link logout-link" data-logout>
                                     <i class="fas fa-sign-out-alt"></i>
                                     Log Out
                                 </a>
                             </div>
-                        <?php elseif ($is_customer): ?>
-                            <!-- Customer Profile Dropdown -->
+                        </div>
+                        <div data-auth="role:customer">
                             <div class="profile-dropdown-header">
                                 <i class="fas fa-user customer-icon"></i>
                                 <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($user_name ?? 'Customer'); ?></span>
+                                    <span class="profile-name" data-user-name>Customer</span>
                                     <span class="profile-role">Customer</span>
                                 </div>
                             </div>
@@ -487,25 +103,21 @@ try {
                                     <i class="fas fa-user"></i>
                                     Profile
                                 </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                <a href="#" class="dropdown-link logout-link" data-logout>
                                     <i class="fas fa-sign-out-alt"></i>
                                     Log Out
                                 </a>
                             </div>
-                        <?php endif; ?>
+                        </div>
                     </div>
                 </div>
-            <?php else: ?>
                 <!-- Guest: Icon redirects to login page -->
-                <a href="login.php" class="icon-link" aria-label="Login/Register">
+                <a href="login.php" class="icon-link" aria-label="Login/Register" data-auth="out">
                     <img src="images/user.png" alt="Login" class="icon">
                 </a>
-            <?php endif; ?>
             <button class="cart-btn" id="cart-btn" aria-label="Shopping Cart">
                 <img src="images/shopping-bag.png" alt="" class="icon">
-                <?php if (isset($_SESSION["user_id"])): ?>
-                    <span class="cart-badge">0</span>
-                <?php endif; ?>
+                <span class="cart-badge" data-auth="in">0</span>
             </button>
         </div>
     </header>
@@ -534,37 +146,30 @@ try {
             <li class="nav-item"><a href="products.php" class="nav-link">Products</a></li>
 
             <!-- Dynamic navigation based on role -->
-            <?php if ($is_admin): ?>
-                <!-- Admin sees Admin Dashboard link instead of Login -->
-                <li class="nav-item">
-                    <a href="admin_dashboard.php" class="nav-link admin-nav-link">
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link admin-nav-link admin-app-link">
                         Admin Dashboard
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
                 </li>
-            <?php elseif ($is_customer): ?>
-                <!-- Customer sees Profile and Logout -->
-                <li class="nav-item">
+                <li class="nav-item" data-auth="role:customer">
                     <a href="bookings.php" class="nav-link">
                         Bookings
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item" data-auth="role:customer">
                     <a href="profile.php" class="nav-link">
                         Profile
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
                 </li>
-            <?php else: ?>
-                <!-- Guest sees Login -->
-                <li class="nav-item">
+                <li class="nav-item" data-auth="out">
                     <a href="login.php" class="nav-link"> Log In</a>
                 </li>
-            <?php endif; ?>
 
             <li class="nav-item">
                 <a href="booking.php" class="nav-link book-now-btn active">
@@ -665,25 +270,21 @@ try {
             <p>Transform your space with our expert cleaning services. Get a free quote in just a few simple steps.</p>
         </section>
 
-                <?php if ($booking_success): ?>
-                    <!-- Success Message -->
-                    <div class="booking-success">
+                    <!-- Success Message (shown by JS after submit) -->
+                    <div class="booking-success" id="booking-success" style="display: none;">
                         <i class="fas fa-check-circle"></i>
                         <h3>Booking Request Submitted!</h3>
-                        <p>Thank you for choosing Phambili Ma-Africa! We'll contact you within 24 hours to schedule your virtual consultation.</p>
+                        <p id="booking-success-text">Thank you for choosing Phambili Ma-Africa! We'll contact you within 24 hours to schedule your virtual consultation.</p>
                         <a href="booking.php" class="new-booking-btn">
                             <i class="fas fa-plus"></i> Book Another Service
                         </a>
                     </div>
-                <?php else: ?>
                     <!-- Error Message -->
-                    <?php if (!empty($booking_error)): ?>
-                        <div class="booking-error">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <h3>Booking Error</h3>
-                            <p><?php echo $booking_error; ?></p>
-                        </div>
-                    <?php endif; ?>
+                    <div class="booking-error" id="booking-error" style="display: none;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <h3>Booking Error</h3>
+                        <p id="booking-error-text"></p>
+                    </div>
 
                     <!-- Multi-Step Booking Form -->
                     <div class="multi-step-booking">
@@ -735,9 +336,7 @@ try {
                         </div>
 
                         <!-- Multi-Step Form -->
-                        <form id="multi-step-form" class="multi-step-form" method="POST" action="">
-                            <!-- CSRF field disabled due to session issues on localhost -->
-                            <!-- <?php csrfField(); ?> -->
+                        <form id="multi-step-form" class="multi-step-form">
                             <!-- Step 1: Service Details -->
                             <div class="form-step active" data-step="1">
                                 <div class="step-header">
@@ -752,15 +351,6 @@ try {
                                     </label>
                                     <select id="service-type" name="service-type" required class="unified-input">
                                         <option value="" disabled selected>Choose a cleaning service</option>
-                                        <?php if (!empty($services)): ?>
-                                            <?php foreach ($services as $service): ?>
-                                                <option value="<?php echo $service['ID']; ?>" 
-                                                    <?php echo (isset($form_data['service_type']) && $form_data['service_type'] == $service['ID']) ? 'selected' : ''; ?>>
-                                                    <?php echo htmlspecialchars($service['Name']); ?> 
-                                                    (<?php echo htmlspecialchars($service['Duration']); ?> min)
-                                                </option>
-                                            <?php endforeach; ?>
-                                        <?php endif; ?>
                                     </select>
                                     <small class="form-hint service-duration-hint">Select a service to see estimated duration</small>
                                     <span class="field-error" id="service-type-error"></span>
@@ -774,10 +364,10 @@ try {
                                         </label>
                                         <select id="property-type" name="property-type" required class="unified-input">
                                             <option value="" disabled selected>Property type</option>
-                                            <option value="house" <?php echo (isset($form_data['property_type']) && $form_data['property_type'] == 'house') ? 'selected' : ''; ?>>House</option>
-                                            <option value="apartment" <?php echo (isset($form_data['property_type']) && $form_data['property_type'] == 'apartment') ? 'selected' : ''; ?>>Apartment</option>
-                                            <option value="office" <?php echo (isset($form_data['property_type']) && $form_data['property_type'] == 'office') ? 'selected' : ''; ?>>Office</option>
-                                            <option value="commercial" <?php echo (isset($form_data['property_type']) && $form_data['property_type'] == 'commercial') ? 'selected' : ''; ?>>Commercial Space</option>
+                                            <option value="house">House</option>
+                                            <option value="apartment">Apartment</option>
+                                            <option value="office">Office</option>
+                                            <option value="commercial">Commercial Space</option>
                                         </select>
                                         <span class="field-error" id="property-type-error"></span>
                                     </div>
@@ -788,11 +378,11 @@ try {
                                             Service Frequency
                                         </label>
                                         <select id="cleaning-frequency" name="cleaning-frequency" class="unified-input">
-                                            <option value="" <?php echo (isset($form_data['cleaning_frequency']) && $form_data['cleaning_frequency'] == '') ? 'selected' : ''; ?>>Service frequency</option>
-                                            <option value="once" <?php echo (isset($form_data['cleaning_frequency']) && $form_data['cleaning_frequency'] == 'once') ? 'selected' : ''; ?>>One-time</option>
-                                            <option value="weekly" <?php echo (isset($form_data['cleaning_frequency']) && $form_data['cleaning_frequency'] == 'weekly') ? 'selected' : ''; ?>>Weekly</option>
-                                            <option value="biweekly" <?php echo (isset($form_data['cleaning_frequency']) && $form_data['cleaning_frequency'] == 'biweekly') ? 'selected' : ''; ?>>Bi-weekly</option>
-                                            <option value="monthly" <?php echo (isset($form_data['cleaning_frequency']) && $form_data['cleaning_frequency'] == 'monthly') ? 'selected' : ''; ?>>Monthly</option>
+                                            <option value="">Service frequency</option>
+                                            <option value="once">One-time</option>
+                                            <option value="weekly">Weekly</option>
+                                            <option value="biweekly">Bi-weekly</option>
+                                            <option value="monthly">Monthly</option>
                                         </select>
                                         <span class="field-error" id="cleaning-frequency-error"></span>
                                     </div>
@@ -818,10 +408,7 @@ try {
                                             <i class="fas fa-calendar-day"></i>
                                             Preferred Date*
                                         </label>
-                                        <input type="date" id="booking-date" name="booking-date" required class="unified-input"
-                                            value="<?php echo isset($form_data['booking_date']) ? htmlspecialchars($form_data['booking_date']) : ''; ?>"
-                                            min="<?php echo date('Y-m-d'); ?>"
-                                            max="<?php echo date('Y-m-d', strtotime('+90 days')); ?>">
+                                        <input type="date" id="booking-date" name="booking-date" required class="unified-input">
                                         <div id="calendar-container"></div>
                                         <div id="date-hint" class="date-hint" style="display: none;">
                                             <i class="fas fa-info-circle"></i>
@@ -837,15 +424,15 @@ try {
                                         </label>
                                         <select id="booking-time" name="booking-time" required class="unified-input">
                                             <option value="" disabled selected>Select time</option>
-                                            <option value="08:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '08:00') ? 'selected' : ''; ?>>08:00 AM</option>
-                                            <option value="09:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '09:00') ? 'selected' : ''; ?>>09:00 AM</option>
-                                            <option value="10:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '10:00') ? 'selected' : ''; ?>>10:00 AM</option>
-                                            <option value="11:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '11:00') ? 'selected' : ''; ?>>11:00 AM</option>
-                                            <option value="12:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '12:00') ? 'selected' : ''; ?>>12:00 PM</option>
-                                            <option value="13:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '13:00') ? 'selected' : ''; ?>>01:00 PM</option>
-                                            <option value="14:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '14:00') ? 'selected' : ''; ?>>02:00 PM</option>
-                                            <option value="15:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '15:00') ? 'selected' : ''; ?>>03:00 PM</option>
-                                            <option value="16:00" <?php echo (isset($form_data['booking_time']) && $form_data['booking_time'] == '16:00') ? 'selected' : ''; ?>>04:00 PM</option>
+                                            <option value="08:00">08:00 AM</option>
+                                            <option value="09:00">09:00 AM</option>
+                                            <option value="10:00">10:00 AM</option>
+                                            <option value="11:00">11:00 AM</option>
+                                            <option value="12:00">12:00 PM</option>
+                                            <option value="13:00">01:00 PM</option>
+                                            <option value="14:00">02:00 PM</option>
+                                            <option value="15:00">03:00 PM</option>
+                                            <option value="16:00">04:00 PM</option>
                                         </select>
                                         <span class="field-error" id="booking-time-error"></span>
                                     </div>
@@ -875,7 +462,7 @@ try {
                                     </label>
                                     <input type="text" id="address-street" name="address-street"
                                         placeholder="Enter your complete street address" required class="unified-input"
-                                        value="<?php echo isset($form_data['address_street']) ? htmlspecialchars($form_data['address_street']) : htmlspecialchars($user_address_street); ?>">
+                                        value="">
                                     <span class="field-error" id="address-street-error"></span>
                                 </div>
 
@@ -887,7 +474,7 @@ try {
                                         </label>
                                         <input type="text" id="address-city" name="address-city" placeholder="City" required
                                         class="unified-input"
-                                        value="<?php echo isset($form_data['address_city']) ? htmlspecialchars($form_data['address_city']) : htmlspecialchars($user_address_city); ?>">
+                                        value="">
                                         <span class="field-error" id="address-city-error"></span>
                                     </div>
 
@@ -898,7 +485,7 @@ try {
                                         </label>
                                         <input type="text" id="address-state" name="address-state" placeholder="State" required
                                         class="unified-input"
-                                        value="<?php echo isset($form_data['address_state']) ? htmlspecialchars($form_data['address_state']) : htmlspecialchars($user_address_state); ?>">
+                                        value="">
                                         <span class="field-error" id="address-state-error"></span>
                                     </div>
 
@@ -909,7 +496,7 @@ try {
                                         </label>
                                         <input type="text" id="address-postal-code" name="address-postal-code"
                                         placeholder="1234" required class="unified-input"
-                                        value="<?php echo isset($form_data['address_postal_code']) ? htmlspecialchars($form_data['address_postal_code']) : htmlspecialchars($user_address_postal); ?>">
+                                        value="">
                                         <div class="postal-format-hint">4 digits only</div>
                                         <span class="field-error" id="address-postal-code-error"></span>
                                     </div>
@@ -940,7 +527,7 @@ try {
                                         </label>
                                         <input type="text" id="customer-name" name="customer-name" placeholder="Your full name"
                                             required class="unified-input"
-                                            value="<?php echo isset($form_data['customer_name']) ? htmlspecialchars($form_data['customer_name']) : ($user_name ?? ''); ?>">
+                                            value="">
                                         <div class="validation-hint">Only letters, spaces, hyphens, and apostrophes allowed</div>
                                         <span class="field-error" id="customer-name-error"></span>
                                     </div>
@@ -952,7 +539,7 @@ try {
                                         </label>
                                         <input type="email" id="customer-email" name="customer-email"
                                             placeholder="your.email@example.com" required class="unified-input"
-                                            value="<?php echo isset($form_data['customer_email']) ? htmlspecialchars($form_data['customer_email']) : htmlspecialchars($user_email); ?>">
+                                            value="">
                                         <span class="field-error" id="customer-email-error"></span>
                                     </div>
 
@@ -963,7 +550,7 @@ try {
                                         </label>
                                         <input type="tel" id="customer-phone" name="customer-phone" placeholder="012 345 6789"
                                             required class="unified-input"
-                                            value="<?php echo isset($form_data['customer_phone']) ? htmlspecialchars($form_data['customer_phone']) : htmlspecialchars($user_phone); ?>">
+                                            value="">
                                         <div class="phone-format-hint">10 digits (South African format)</div>
                                         <span class="field-error" id="customer-phone-error"></span>
                                     </div>
@@ -997,7 +584,7 @@ try {
                                     </label>
                                     <textarea id="special-requests" name="special-requests"
                                         placeholder="Any specific requirements, access instructions, areas of focus, or additional information that will help us provide best service..."
-                                        class="unified-textarea"><?php echo isset($form_data['special_requests']) ? htmlspecialchars($form_data['special_requests']) : ''; ?></textarea>
+                                        class="unified-textarea"></textarea>
                                 </div>
 
                                 <div class="step-actions">
@@ -1033,7 +620,6 @@ try {
                             </div>
                         </div>
                     </div>
-                <?php endif; ?>
             </div>
         </section>
     </main>
@@ -1507,34 +1093,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Check for duplicate booking via AJAX
+// Check for duplicate booking — implemented in the page's module
+// script (pmaCheckDuplicateBooking) which queries Firestore directly.
 function checkDuplicateBooking() {
     const serviceId = document.getElementById('service-type')?.value;
     const date = document.getElementById('booking-date')?.value;
-    
-    if (!serviceId || !date) return;
-    
-    // Create form data
-    const formData = new FormData();
-    formData.append('check_duplicate', '1');
-    formData.append('service_id', serviceId);
-    formData.append('booking_date', date);
-    
-    // Send AJAX request
-    fetch('booking.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.duplicate) {
+    if (!serviceId || !date || !window.pmaCheckDuplicateBooking) return;
+    window.pmaCheckDuplicateBooking(serviceId, date).then((dup) => {
+        if (dup) {
             showFieldError('booking-date', 'You have already booked this service for ' + date + '. Please select a different date or service.');
             alert('You have already booked this service for ' + date + '. Please select a different date or service.');
         }
-    })
-    .catch(error => {
-        console.error('Error checking duplicate:', error);
-    });
+    }).catch((e) => console.error('Error checking duplicate:', e));
 }
 
 // Add CSS animations
@@ -1632,5 +1202,106 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 </script>
+    <script src="./js/config.js"></script>
+    <script type="module" src="./js/firebase/ui.js"></script>
+    <script type="module" src="./js/firebase/notifications.js"></script>
+    <script type="module">
+        import { watchServices, createRequest, hasDuplicateRequest } from './js/firebase/data.js';
+        import { requireAuth } from './js/firebase/auth.js';
+
+        const form = document.getElementById('multi-step-form');
+        const successBox = document.getElementById('booking-success');
+        const errorBox = document.getElementById('booking-error');
+        const serviceSelect = document.getElementById('service-type');
+        const dateInput = document.getElementById('booking-date');
+
+        const authed = await requireAuth('booking.php');
+        if (!authed) throw new Error('redirected to login');
+        const { user, profile } = authed;
+
+        // Pre-fill contact + address fields from the Firestore profile.
+        if (profile) {
+            const addr = profile.address || {};
+            const fill = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+            fill('customer-name', `${profile.firstName || ''} ${profile.lastName || ''}`.trim());
+            fill('customer-email', profile.email || user.email);
+            fill('customer-phone', profile.phone);
+            if (typeof addr === 'object') {
+                fill('address-street', addr.street);
+                fill('address-city', addr.city);
+                fill('address-state', addr.state);
+                fill('address-postal-code', addr.postal);
+            } else {
+                fill('address-street', addr);
+            }
+        }
+
+        // Date bounds: today → +90 days.
+        const today = new Date();
+        const max = new Date(Date.now() + 90 * 864e5);
+        dateInput.min = today.toISOString().split('T')[0];
+        dateInput.max = max.toISOString().split('T')[0];
+
+        // Populate the service dropdown from Firestore.
+        let services = [];
+        watchServices((list) => {
+            services = list.filter((s) => s.Is_Available);
+            const current = serviceSelect.value;
+            serviceSelect.innerHTML = '<option value="" disabled selected>Choose a cleaning service</option>' +
+                services.map((s) =>
+                    `<option value="${s.ID}">${s.Name}${s.Duration ? ` (${s.Duration} min)` : ''}</option>`
+                ).join('');
+            if (current) serviceSelect.value = current;
+            // Preselect via ?service=<id>
+            const pre = new URLSearchParams(location.search).get('service');
+            if (pre && services.some((s) => s.ID === pre)) serviceSelect.value = pre;
+        });
+
+        // Exposed to the page's existing checkDuplicateBooking() helper.
+        window.pmaCheckDuplicateBooking = (serviceId, date) =>
+            hasDuplicateRequest(user.uid, serviceId, date);
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            errorBox.style.display = 'none';
+            try {
+                const v = (id) => document.getElementById(id)?.value.trim() || '';
+                const svc = services.find((s) => s.ID === v('service-type')) || {};
+                const street = v('address-street'), city = v('address-city'),
+                      state = v('address-state'), postal = v('address-postal-code');
+                const req = await createRequest(profile, {
+                    serviceId: svc.ID,
+                    serviceName: svc.Name || '',
+                    customerName: v('customer-name'),
+                    customerPhone: v('customer-phone'),
+                    customerEmail: v('customer-email'),
+                    requestedDate: v('booking-date'),
+                    requestedTime: v('booking-time'),
+                    siteAddress: [street, city, state, postal].filter(Boolean).join(', '),
+                    addressStreet: street, addressCity: city, addressState: state, addressPostal: postal,
+                    propertyType: v('property-type'),
+                    cleaningFrequency: v('cleaning-frequency'),
+                    specialInstructions: v('special-requests'),
+                    quoteRequested: true,
+                });
+                document.getElementById('booking-success-text').textContent =
+                    `Thank you for choosing Phambili Ma-Africa! Your reference is ${req.refNumber}. We'll contact you within 24 hours to schedule your virtual consultation.`;
+                form.closest('.multi-step-booking').style.display = 'none';
+                document.querySelector('.why-choose').style.display = 'none';
+                successBox.style.display = '';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (err) {
+                console.error(err);
+                document.getElementById('booking-error-text').textContent =
+                    'Something went wrong submitting your booking. Please try again.';
+                errorBox.style.display = '';
+                errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    </script>
 </body>
 </html>

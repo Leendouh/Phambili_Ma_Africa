@@ -1,369 +1,3 @@
-<?php
-// Start session and include database connection
-require_once 'includes/config_session.inc.php';
-require_once 'includes/dbh.inc.php';
-
-// Get user data if logged in
-$user_id = $_SESSION['user_id'] ?? null;
-$user_name = $_SESSION['user_name'] ?? '';
-$user_role = $_SESSION['user_role'] ?? '';
-
-// Check user login status
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-
-// Fetch notifications for customer
-$notifications = [];
-$unreadCount = 0;
-if ($is_customer && $user_id) {
-    require_once 'includes/notifications_model.inc.php';
-    $notifications = get_notifications($pdo, $user_id, 'customer', true, 5);
-    $unreadCount = get_unread_notification_count($pdo, $user_id, 'customer');
-}
-
-// Fetch user profile data for form pre-population
-$user_email = '';
-$user_phone = '';
-$user_address_street = '';
-$user_address_city = '';
-$user_address_state = '';
-$user_address_postal = '';
-
-if ($user_id) {
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM customers WHERE ID = ?");
-        $stmt->execute([$user_id]);
-        $user_data = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($user_data) {
-            $user_email = $user_data['Email'] ?? '';
-            $user_phone = $user_data['Phone'] ?? '';
-
-            // Parse address from single field (comma-separated: Street, City, State, Postal)
-            $address = $user_data['Address'] ?? '';
-            if ($address) {
-                $address_parts = array_map('trim', explode(',', $address));
-                $user_address_street = $address_parts[0] ?? '';
-                $user_address_city = $address_parts[1] ?? '';
-                $user_address_state = $address_parts[2] ?? '';
-                $user_address_postal = $address_parts[3] ?? '';
-
-                // Handle old format where state and postal might be separated by space instead of comma
-                if (empty($user_address_postal) && !empty($user_address_state)) {
-                    $state_parts = preg_split('/\s+/', $user_address_state);
-                    if (count($state_parts) >= 2) {
-                        $user_address_state = $state_parts[0];
-                        $user_address_postal = end($state_parts);
-                    }
-                }
-            }
-        }
-    } catch (PDOException $e) {
-        error_log("Error fetching user data: " . $e->getMessage());
-    }
-}
-
-// Fetch all services including unavailable ones
-try {
-    $stmt = $pdo->prepare("
-        SELECT * FROM services 
-        ORDER BY Category, Name
-    ");
-    $stmt->execute();
-    $services = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    error_log("Error fetching services: " . $e->getMessage());
-    $services = [];
-}
-
-// Get unique categories for filter
-$categories = [];
-foreach ($services as $service) {
-    $cat = $service['Category'] ?? 'General';
-    if (!in_array($cat, $categories)) {
-        $categories[] = $cat;
-    }
-}
-
-// Handle search and filters
-$search = $_GET['search'] ?? '';
-$category_filter = $_GET['category'] ?? 'all';
-$sort = $_GET['sort'] ?? 'default';
-
-// Filter services
-$filtered_services = $services;
-if (!empty($search)) {
-    $filtered_services = array_filter($filtered_services, function ($s) use ($search) {
-        return stripos($s['Name'], $search) !== false ||
-            stripos($s['Description'], $search) !== false;
-    });
-}
-
-if ($category_filter !== 'all') {
-    $filtered_services = array_filter($filtered_services, function ($s) use ($category_filter) {
-        return ($s['Category'] ?? 'General') === $category_filter;
-    });
-}
-
-// Sort services
-switch ($sort) {
-    case 'name':
-        usort($filtered_services, function ($a, $b) {
-            return strcmp($a['Name'], $b['Name']);
-        });
-        break;
-    case 'duration':
-        usort($filtered_services, function ($a, $b) {
-            return ($a['Duration'] ?? 0) - ($b['Duration'] ?? 0);
-        });
-        break;
-}
-
-// Handle booking form submission
-$bookingMessage = '';
-$bookingError = '';
-$selected_service = null;
-
-if (isset($_GET['book']) && is_numeric($_GET['book'])) {
-    $service_id = (int)$_GET['book'];
-    // Find the selected service
-    foreach ($services as $service) {
-        if ($service['ID'] == $service_id) {
-            $selected_service = $service;
-            break;
-        }
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_quotation'])) {
-    $service_id = (int)($_POST['service_id'] ?? 0);
-    $property_type = trim($_POST['property_type'] ?? '');
-    $cleaning_frequency = trim($_POST['cleaning_frequency'] ?? '');
-    $booking_date = trim($_POST['booking_date'] ?? '');
-    $booking_time = trim($_POST['booking_time'] ?? '');
-    $address_street = trim($_POST['address_street'] ?? '');
-    $address_city = trim($_POST['address_city'] ?? '');
-    $address_state = trim($_POST['address_state'] ?? '');
-    $address_postal = trim($_POST['address_postal'] ?? '');
-    $special_requests = trim($_POST['special_requests'] ?? '');
-    $customer_name = trim($_POST['customer_name'] ?? '');
-    $customer_phone = trim($_POST['customer_phone'] ?? '');
-    $customer_email = trim($_POST['customer_email'] ?? '');
-
-    // Validation
-    $errors = [];
-    if (empty($property_type)) $errors[] = "Property type is required.";
-    if (empty($cleaning_frequency)) $errors[] = "Service frequency is required.";
-    if (empty($booking_date)) $errors[] = "Preferred date is required.";
-    if (empty($booking_time)) $errors[] = "Preferred time is required.";
-    // Strict validation for all required fields
-    if (empty($address_street) || trim($address_street) === '') {
-        $errors[] = "Street address is required.";
-    }
-    if (empty($address_city) || trim($address_city) === '') {
-        $errors[] = "City is required.";
-    }
-    if (empty($address_state) || trim($address_state) === '') {
-        $errors[] = "State/Province is required.";
-    }
-    if (empty($address_postal) || trim($address_postal) === '') {
-        $errors[] = "Postal code is required.";
-    }
-    if (empty($customer_name) || trim($customer_name) === '') {
-        $errors[] = "Full name is required.";
-    }
-    if (empty($customer_phone)) {
-        $errors[] = "Phone number is required.";
-    }
-    if (empty($customer_email)) {
-        $errors[] = "Email address is required.";
-    }
-
-    // Strict email validation
-    if (!empty($customer_email)) {
-        if (!filter_var($customer_email, FILTER_VALIDATE_EMAIL)) {
-            $errors[] = "Please enter a valid email address (e.g., name@example.com).";
-        } elseif (strlen($customer_email) > 254) {
-            $errors[] = "Email address is too long.";
-        }
-    }
-
-    // Strict phone validation - exactly 10 digits, only numbers, South African format
-    if (!empty($customer_phone)) {
-        // Remove all non-digit characters
-        $phone = preg_replace('/\D/', '', $customer_phone);
-
-        if (!ctype_digit($phone)) {
-            $errors[] = "Phone number must contain only digits (0-9), no letters or special characters.";
-        } elseif (strlen($phone) !== 10) {
-            $errors[] = "Phone number must be exactly 10 digits.";
-        } elseif (!preg_match('/^0[0-9]{9}$/', $phone)) {
-            $errors[] = "Phone number must start with 0 followed by 9 digits (e.g., 0821234567).";
-        }
-    }
-
-    // Postal code validation (4 digits)
-    if (!empty($address_postal)) {
-        $postal = preg_replace('/\D/', '', $address_postal);
-        if (!ctype_digit($postal) || strlen($postal) !== 4) {
-            $errors[] = "Postal code must be exactly 4 digits (e.g., 2000).";
-        }
-    }
-
-    // Date/Time validation
-    if (empty($errors)) {
-        $today = date('Y-m-d');
-        $current_time = date('H:i');
-        $current_hour = (int)date('H');
-        $booking_timestamp = strtotime($booking_date . ' ' . $booking_time);
-        $current_timestamp = time();
-
-        // Check if booking date is in the past
-        if ($booking_date < $today) {
-            $errors[] = "Cannot book for past dates. Please select today or a future date.";
-        }
-
-        // Check if booking time has already passed
-        if ($booking_date === $today && $booking_time <= $current_time) {
-            $errors[] = "Cannot book for past times. Please select a future time.";
-        }
-
-        // Same-day booking restriction: must book before 12 PM
-        if ($booking_date === $today && $current_hour >= 12) {
-            $tomorrow = date('Y-m-d', strtotime('+1 day'));
-            $errors[] = "Same-day bookings must be made before 12:00 PM. Please select {$tomorrow} or later.";
-        }
-    }
-
-    if (empty($errors)) {
-        try {
-            // Check for duplicate booking (same customer, same service, same day)
-            $check_stmt = $pdo->prepare("
-                SELECT COUNT(*) FROM bookings 
-                WHERE Customer_ID = ? AND Service_ID = ? AND Date = ?
-            ");
-            $check_stmt->execute([$user_id, $service_id, $booking_date]);
-            $existing_count = $check_stmt->fetchColumn();
-
-            if ($existing_count > 0) {
-                $_SESSION['booking_error'] = "You have already booked this service for " . date('F j, Y', strtotime($booking_date)) . ". Please select a different date or service.";
-                // Re-select the service to show form again with errors
-                foreach ($services as $s) {
-                    if ($s['ID'] == $service_id) {
-                        $selected_service = $s;
-                        break;
-                    }
-                }
-            } else {
-                // Format address
-                $formatted_address = implode(', ', array_filter([$address_street, $address_city, $address_state, $address_postal]));
-
-                // Create booking
-                $stmt = $pdo->prepare("
-                    INSERT INTO bookings 
-                    (Customer_ID, Service_ID, Date, Time, Status, Address, Special_Instructions, Property_Type, Cleaning_Frequency, Duration, created_at) 
-                    VALUES (?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, NOW())
-                ");
-
-                // Get duration from service
-                $duration = 60; // default
-                foreach ($services as $s) {
-                    if ($s['ID'] == $service_id) {
-                        $duration = $s['Duration'] ?? 60;
-                        break;
-                    }
-                }
-
-                $success = $stmt->execute([
-                    $user_id,
-                    $service_id,
-                    $booking_date,
-                    $booking_time,
-                    $formatted_address,
-                    $special_requests,
-                    $property_type,
-                    $cleaning_frequency,
-                    $duration
-                ]);
-
-                if ($success) {
-                    // Update customer profile with phone and address from booking
-                    if ($user_id) {
-                        try {
-                            // Clean phone number - digits only
-                            $clean_phone = preg_replace('/\D/', '', $customer_phone);
-                            // Format address as comma-separated string
-                            $profile_address = trim($address_street . ', ' .
-                                $address_city . ', ' .
-                                $address_state . ', ' .
-                                $address_postal);
-
-                            $update_stmt = $pdo->prepare("
-                                UPDATE customers 
-                                SET Phone = :phone, Address = :address, updatedAt = NOW()
-                                WHERE ID = :id
-                            ");
-                            $update_stmt->execute([
-                                ':phone' => $clean_phone,
-                                ':address' => $profile_address,
-                                ':id' => $user_id
-                            ]);
-                        } catch (PDOException $e) {
-                            // Log error but don't fail booking if profile update fails
-                            error_log("Failed to update customer profile after booking in services.php: " . $e->getMessage());
-                        }
-                    }
-
-                    // Store success message in session for display after redirect
-                    $_SESSION['booking_message'] = "Your quotation request has been submitted successfully! We will contact you within 24 hours. Redirecting to your bookings...";
-                    $_SESSION['booking_status'] = 'success';
-
-                    // Redirect to services page to show message, then redirect to bookings
-                    header("Location: services.php?booked=1");
-                    exit();
-                } else {
-                    $bookingError = "Failed to submit request. Please try again.";
-                }
-            }
-        } catch (PDOException $e) {
-            error_log("Booking creation error: " . $e->getMessage());
-            $bookingError = "Failed to submit request. Please try again.";
-        }
-    } else {
-        $bookingError = implode(" ", $errors);
-        // Re-select the service to show form again with errors
-        foreach ($services as $s) {
-            if ($s['ID'] == $service_id) {
-                $selected_service = $s;
-                break;
-            }
-        }
-    }
-}
-
-// Check for session messages from successful booking
-if (isset($_SESSION['booking_message'])) {
-    $bookingMessage = $_SESSION['booking_message'];
-    unset($_SESSION['booking_message']);
-}
-if (isset($_SESSION['booking_status'])) {
-    $bookingStatus = $_SESSION['booking_status'];
-    unset($_SESSION['booking_status']);
-}
-if (isset($_SESSION['booking_error'])) {
-    $bookingError = $_SESSION['booking_error'];
-    unset($_SESSION['booking_error']);
-}
-
-// Get cart count from session or localStorage (will be handled by JS)
-$cart_count = 0;
-
-// Check user login status
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-$user_email = $_SESSION['user_email'] ?? '';
-?>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -395,7 +29,7 @@ $user_email = $_SESSION['user_email'] ?? '';
     <link rel="stylesheet" href="./css/social-media.css">
 </head>
 
-<body class="services-page" data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+<body class="services-page"">
     <!-- Updated Header Section -->
     <header class="header">
         <!-- Hamburger Menu Button -->
@@ -412,14 +46,9 @@ $user_email = $_SESSION['user_email'] ?? '';
 
         <!-- Icons (Right) -->
         <div class="header-icons">
-            <?php if ($is_customer && $user_id): ?>
-                <!-- Notification Bell -->
-                <div class="notification-bell-customer">
+            <div class="notification-bell-customer" data-auth="role:customer">
                     <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
                         <i class="fas fa-bell"></i>
-                        <?php if ($unreadCount > 0): ?>
-                            <span class="notification-badge-customer"><?php echo $unreadCount; ?></span>
-                        <?php endif; ?>
                     </button>
                     <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
                         <div class="notification-dropdown-header">
@@ -427,61 +56,42 @@ $user_email = $_SESSION['user_email'] ?? '';
                             <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
                         </div>
                         <div class="notification-dropdown-content">
-                            <?php if (empty($notifications)): ?>
-                                <div class="no-notifications">
-                                    <i class="fas fa-bell-slash"></i>
-                                    <p>No new notifications</p>
-                                </div>
-                            <?php else: ?>
-                                <?php foreach ($notifications as $notif): ?>
-                                    <div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
-                                        <div class="notif-content">
-                                            <strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                            <p><?php echo htmlspecialchars($notif['message']); ?></p>
-                                            <small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                                        </div>
-                                        <button class="notif-close" onclick="markCustomerNotificationRead(<?php echo $notif['ID']; ?>)">
-                                            <i class="fas fa-times"></i>
-                                        </button>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
+                            <div class="no-notifications">
+                                <i class="fas fa-bell-slash"></i>
+                                <p>No new notifications</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-            <?php endif; ?>
-            <?php if ($is_logged_in): ?>
-                <!-- User Profile Dropdown (shown when logged in) -->
-                <div class="user-profile-dropdown" id="user-profile-dropdown">
+            <div class="user-profile-dropdown" id="user-profile-dropdown" data-auth="in">
                     <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
                         <img src="images/user.png" alt="User" class="icon" id="user-icon">
                     </button>
                     <div class="profile-dropdown-menu" id="profile-dropdown-menu">
-                        <?php if ($is_admin): ?>
-                            <!-- Admin Profile Dropdown -->
+                        <div data-auth="role:staff,admin,main_admin,super_admin">
                             <div class="profile-dropdown-header">
                                 <i class="fas fa-user-shield admin-icon"></i>
                                 <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Administrator'); ?></span>
+                                    <span class="profile-name" data-user-name>Administrator</span>
                                     <span class="profile-role">Admin</span>
                                 </div>
                             </div>
                             <div class="profile-dropdown-links">
-                                <a href="admin_dashboard.php" class="dropdown-link">
+                                <a href="#" class="dropdown-link admin-app-link">
                                     <i class="fas fa-tachometer-alt"></i>
                                     Admin Dashboard
                                 </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                <a href="#" class="dropdown-link logout-link" data-logout>
                                     <i class="fas fa-sign-out-alt"></i>
                                     Log Out
                                 </a>
                             </div>
-                        <?php elseif ($is_customer): ?>
-                            <!-- Customer Profile Dropdown -->
+                        </div>
+                        <div data-auth="role:customer">
                             <div class="profile-dropdown-header">
                                 <i class="fas fa-user customer-icon"></i>
                                 <div class="profile-info">
-                                    <span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Customer'); ?></span>
+                                    <span class="profile-name" data-user-name>Customer</span>
                                     <span class="profile-role">Customer</span>
                                 </div>
                             </div>
@@ -494,25 +104,21 @@ $user_email = $_SESSION['user_email'] ?? '';
                                     <i class="fas fa-user"></i>
                                     Profile
                                 </a>
-                                <a href="includes/logout.inc.php" class="dropdown-link logout-link">
+                                <a href="#" class="dropdown-link logout-link" data-logout>
                                     <i class="fas fa-sign-out-alt"></i>
                                     Log Out
                                 </a>
                             </div>
-                        <?php endif; ?>
+                        </div>
                     </div>
                 </div>
-            <?php else: ?>
                 <!-- Guest: Icon redirects to login page -->
-                <a href="login.php" class="icon-link" aria-label="Login/Register">
+                <a href="login.php" class="icon-link" aria-label="Login/Register" data-auth="out">
                     <img src="images/user.png" alt="Login" class="icon">
                 </a>
-            <?php endif; ?>
             <button class="cart-btn" id="cart-btn" aria-label="Shopping Cart">
                 <img src="images/shopping-bag.png" alt="" class="icon">
-                <?php if (isset($_SESSION["user_id"])): ?>
-                    <span class="cart-badge">0</span>
-                <?php endif; ?>
+                <span class="cart-badge" data-auth="in">0</span>
             </button>
         </div>
     </header>
@@ -542,37 +148,30 @@ $user_email = $_SESSION['user_email'] ?? '';
             <li class="nav-item"><a href="products.php" class="nav-link"> Products</a></li>
 
             <!-- Dynamic navigation based on role -->
-            <?php if ($is_admin): ?>
-                <!-- Admin sees Admin Dashboard link instead of Login -->
-                <li class="nav-item">
-                    <a href="admin_dashboard.php" class="nav-link admin-nav-link">
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link admin-nav-link admin-app-link">
                         Admin Dashboard
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
                 </li>
-            <?php elseif ($is_customer): ?>
-                <!-- Customer sees Profile and Logout -->
-                <li class="nav-item">
+                <li class="nav-item" data-auth="role:customer">
                     <a href="bookings.php" class="nav-link">
                         Bookings
                     </a>
                 </li>
-                <li class="nav-item">
+                <li class="nav-item" data-auth="role:customer">
                     <a href="profile.php" class="nav-link">
                         Profile
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="includes/logout.inc.php" class="nav-link"> Log Out</a>
+                <li class="nav-item" data-auth="role:customer">
+                    <a href="#" class="nav-link" data-logout> Log Out</a>
                 </li>
-            <?php else: ?>
-                <!-- Guest sees Login -->
-                <li class="nav-item">
+                <li class="nav-item" data-auth="out">
                     <a href="login.php" class="nav-link"> Log In</a>
                 </li>
-            <?php endif; ?>
 
             <li class="nav-item">
                 <a href="booking.php" class="nav-link book-now-btn ">
@@ -676,47 +275,33 @@ $user_email = $_SESSION['user_email'] ?? '';
             <div class="services-container">
 
                 <!-- Messages -->
-                <?php if ($bookingMessage): ?>
-                    <div class="alert alert-success">
-                        <i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($bookingMessage); ?>
-                    </div>
-                <?php endif; ?>
+                <div id="pageMessages"></div>
 
                 <!-- Enhanced Services Controls -->
                 <div class="services-controls">
-                    <form method="GET" action="services.php" class="search-box">
+                    <form class="search-box" onsubmit="return false;">
                         <i class="fas fa-search"></i>
-                        <input type="text" name="search" placeholder="Search services by name or description..."
-                            value="<?php echo htmlspecialchars($search); ?>" aria-label="Search services">
+                        <input type="text" id="serviceSearch" name="search" placeholder="Search services by name or description..."
+                            aria-label="Search services">
                     </form>
 
                     <div class="filters-container">
-                        <form method="GET" action="services.php" class="filter-form">
+                        <form class="filter-form" onsubmit="return false;">
                             <div class="filter-group">
                                 <label for="category" class="filter-label">Category</label>
-                                <select name="category" id="category" onchange="this.form.submit()">
+                                <select name="category" id="category">
                                     <option value="all">All Categories</option>
-                                    <?php foreach ($categories as $cat): ?>
-                                        <option value="<?php echo htmlspecialchars($cat); ?>"
-                                            <?php echo $category_filter === $cat ? 'selected' : ''; ?>>
-                                            <?php echo htmlspecialchars($cat); ?>
-                                        </option>
-                                    <?php endforeach; ?>
                                 </select>
                             </div>
 
                             <div class="filter-group">
                                 <label for="sort" class="filter-label">Sort By</label>
-                                <select name="sort" id="sort" onchange="this.form.submit()">
-                                    <option value="default" <?php echo $sort === 'default' ? 'selected' : ''; ?>>Featured</option>
-                                    <option value="name" <?php echo $sort === 'name' ? 'selected' : ''; ?>>Name A-Z</option>
-                                    <option value="duration" <?php echo $sort === 'duration' ? 'selected' : ''; ?>>Duration</option>
+                                <select name="sort" id="sort">
+                                    <option value="default">Featured</option>
+                                    <option value="name">Name A-Z</option>
+                                    <option value="duration">Duration</option>
                                 </select>
                             </div>
-
-                            <?php if ($search): ?>
-                                <input type="hidden" name="search" value="<?php echo htmlspecialchars($search); ?>">
-                            <?php endif; ?>
                         </form>
                     </div>
                 </div>
@@ -725,7 +310,7 @@ $user_email = $_SESSION['user_email'] ?? '';
                     <div class="my-bookings-link">
                         <a href="bookings.php" class="btn-bookings">View Bookings →</a>
                     </div>
-                    <p id="resultsCount"><?php echo count($filtered_services); ?> service<?php echo count($filtered_services) !== 1 ? 's' : ''; ?> available</p>
+                    <p id="resultsCount">Loading services...</p>
                     <div class="results-stats">
                         <span class="stat-item">
                             <i class="fas fa-sync-alt"></i>
@@ -736,163 +321,81 @@ $user_email = $_SESSION['user_email'] ?? '';
 
                 <!-- Dynamic Services Grid -->
                 <div class="services-grid" id="servicesGrid">
-                    <?php if (empty($filtered_services)): ?>
-                        <div class="no-results" id="noResults" style="display: block;">
-                            <div class="no-results-content">
-                                <i class="fas fa-search"></i>
-                                <h3>No Services Found</h3>
-                                <p>We couldn't find any services matching your criteria. Try adjusting your search or filters.</p>
-                                <a href="services.php" class="btn btn-primary">
-                                    <i class="fas fa-refresh"></i> Reset Filters
-                                </a>
-                            </div>
+                    <div class="no-results" id="noResults" style="display: block;">
+                        <div class="no-results-content">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <h3>Loading services...</h3>
                         </div>
-                    <?php else: ?>
-                        <?php foreach ($filtered_services as $service):
-                            $duration = $service['Duration'] ?? 60;
-                            $duration_text = $duration >= 60 ? floor($duration / 60) . 'h ' . ($duration % 60) . 'm' : $duration . ' min';
-                            $badge_class = '';
-                            if (strtolower($service['Name'] ?? '') === 'deep cleaning') $badge_class = 'popular';
-                            elseif (strtolower($service['Name'] ?? '') === 'office cleaning') $badge_class = 'trending';
-                        ?>
-                            <div class="service-card <?php echo ($service['Is_Available'] ?? 1) == 0 ? 'service-unavailable' : ''; ?>">
-                                <?php if (($service['Is_Available'] ?? 1) == 0): ?>
-                                    <span class="service-badge unavailable">Unavailable</span>
-                                <?php elseif ($badge_class): ?>
-                                    <span class="service-badge <?php echo $badge_class; ?>"><?php echo ucfirst($badge_class); ?></span>
-                                <?php endif; ?>
-                                <div class="service-image-container">
-                                    <?php if (!empty($service['Image_URL'])): ?>
-                                        <img src="<?php echo htmlspecialchars($service['Image_URL']); ?>"
-                                            alt="<?php echo htmlspecialchars($service['Name']); ?>">
-                                        <div class="image-placeholder" style="display: none;">
-                                            <i class="fas fa-broom"></i>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="service-image-placeholder">
-                                            <i class="fas fa-broom"></i>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="service-content">
-                                    <h3><?php echo htmlspecialchars($service['Name']); ?></h3>
-                                    <p><?php echo htmlspecialchars($service['Description'] ?? 'Professional cleaning service'); ?></p>
-
-                                    <div class="service-features">
-                                        <span class="feature-tag">
-                                            <i class="fas fa-clock"></i> <?php echo $duration_text; ?>
-                                        </span>
-                                        <span class="feature-tag">
-                                            <i class="fas fa-star"></i> Professional
-                                        </span>
-                                        <span class="feature-tag">
-                                            <i class="fas fa-shield-alt"></i> Insured
-                                        </span>
-                                    </div>
-
-                                    <div class="service-footer">
-                                        <div class="price-container">
-                                            <span class="price-note">Custom Quote</span>
-                                        </div>
-                                        <?php if (($service['Is_Available'] ?? 1) == 0): ?>
-                                            <span class="service-cta-btn service-unavailable-btn">
-                                                <i class="fas fa-ban"></i> Currently Unavailable
-                                            </span>
-                                        <?php elseif ($user_id): ?>
-                                            <a href="services.php?book=<?php echo $service['ID']; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $category_filter !== 'all' ? '&category=' . urlencode($category_filter) : ''; ?>"
-                                                class="service-cta-btn">
-                                                Book Now
-                                            </a>
-                                        <?php else: ?>
-                                            <a href="javascript:void(0)" onclick="handleBookNow(<?php echo $service['ID']; ?>)"
-                                                class="service-cta-btn">
-                                                Book Now
-                                            </a>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
+                    </div>
                 </div>
 
-                <!-- Enhanced Service Booking Popup -->
-                <?php if ($selected_service && $user_id): ?>
-                    <div id="service-popup" class="service-popup active" role="dialog" aria-modal="true">
-                        <div class="popup-overlay"></div>
-                        <div class="popup-container">
-                            <a href="services.php<?php echo $search ? '?search=' . urlencode($search) : ''; ?><?php echo $category_filter !== 'all' ? ($search ? '&' : '?') . 'category=' . urlencode($category_filter) : ''; ?>"
-                                class="popup-close" aria-label="Close popup">
-                                <i class="fas fa-times"></i>
-                            </a>
+                <!-- Enhanced Service Booking Popup (populated by JS) -->
+                <div id="service-popup" class="service-popup" role="dialog" aria-modal="true" style="display: none;">
+                    <div class="popup-overlay"></div>
+                    <div class="popup-container">
+                        <a href="services.php" class="popup-close" aria-label="Close popup">
+                            <i class="fas fa-times"></i>
+                        </a>
 
-                            <div class="popup-content">
-                                <!-- Left Side - Service Image & Info -->
-                                <div class="popup-image">
-                                    <div class="popup-image-content">
-                                        <?php if (!empty($selected_service['Image_URL'])): ?>
-                                            <img src="<?php echo htmlspecialchars($selected_service['Image_URL']); ?>"
-                                                alt="<?php echo htmlspecialchars($selected_service['Name']); ?>">
-                                        <?php else: ?>
-                                            <div class="image-placeholder">
-                                                <i class="fas fa-concierge-bell"></i>
-                                            </div>
-                                        <?php endif; ?>
-                                        <div class="popup-image-info">
-                                            <h3><?php echo htmlspecialchars($selected_service['Name']); ?></h3>
-                                            <div class="service-features">
-                                                <span class="feature-tag">
-                                                    <i class="fas fa-clock"></i>
-                                                    <?php
-                                                    $duration = $selected_service['Duration'] ?? 60;
-                                                    echo $duration >= 60 ? floor($duration / 60) . 'h ' . ($duration % 60) . 'm' : $duration . ' min';
-                                                    ?>
-                                                </span>
-                                                <span class="feature-tag">
-                                                    <i class="fas fa-star"></i> Professional Service
-                                                </span>
-                                                <span class="feature-tag">
-                                                    <i class="fas fa-shield-alt"></i> Insured & Certified
-                                                </span>
-                                            </div>
+                        <div class="popup-content">
+                            <!-- Left Side - Service Image & Info -->
+                            <div class="popup-image">
+                                <div class="popup-image-content">
+                                    <div id="popupServiceImage">
+                                        <div class="image-placeholder">
+                                            <i class="fas fa-concierge-bell"></i>
                                         </div>
-                                        <!-- Service Description Below Image -->
-                                        <div class="popup-description-container">
-                                            <div class="description-header">
-                                                <i class="fas fa-info-circle"></i>
-                                                <h4>Service Description</h4>
+                                    </div>
+                                    <div class="popup-image-info">
+                                        <h3 id="popupServiceName"></h3>
+                                        <div class="service-features">
+                                            <span class="feature-tag">
+                                                <i class="fas fa-clock"></i>
+                                                <span id="popupServiceDuration"></span>
+                                            </span>
+                                            <span class="feature-tag">
+                                                <i class="fas fa-star"></i> Professional Service
+                                            </span>
+                                            <span class="feature-tag">
+                                                <i class="fas fa-shield-alt"></i> Insured & Certified
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <!-- Service Description Below Image -->
+                                    <div class="popup-description-container">
+                                        <div class="description-header">
+                                            <i class="fas fa-info-circle"></i>
+                                            <h4>Service Description</h4>
+                                        </div>
+                                        <p class="popup-description" id="popupServiceDescription"></p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Right Side - Booking Form -->
+                            <div class="popup-details">
+                                <div class="popup-header">
+                                    <h2>Request Quotation</h2>
+
+                                    <!-- Welcome Message at the top of the form -->
+                                    <div class="welcome-message">
+                                        <div class="welcome-header">
+                                            <i class="fas fa-comments"></i>
+                                            <h3>Hi there,</h3>
+                                        </div>
+                                        <div class="welcome-content">
+                                            <p>Thank you for connecting through our online booking system!</p>
+                                            <p>After you have submitted this, you will receive confirmation where you will select a date & time for a virtual consultation to discuss your needs, view your space, provide you a quote, and get you booked in with us!</p>
+                                            <div class="signature">
+                                                <p><strong>Thank you,</strong></p>
+                                                <p class="company-name">Phambili Ma-Africa - Trading Enterprise</p>
                                             </div>
-                                            <p class="popup-description">
-                                                <?php echo htmlspecialchars($selected_service['Description'] ?? 'Professional cleaning service tailored to your needs. Our experienced team uses eco-friendly products and advanced techniques to deliver exceptional results every time.'); ?>
-                                            </p>
                                         </div>
                                     </div>
                                 </div>
 
-                                <!-- Right Side - Booking Form -->
-                                <div class="popup-details">
-                                    <div class="popup-header">
-                                        <h2>Request Quotation</h2>
-
-                                        <!-- Welcome Message at the top of the form -->
-                                        <div class="welcome-message">
-                                            <div class="welcome-header">
-                                                <i class="fas fa-comments"></i>
-                                                <h3>Hi there,</h3>
-                                            </div>
-                                            <div class="welcome-content">
-                                                <p>Thank you for connecting through our online booking system!</p>
-                                                <p>After you have submitted this, you will receive confirmation where you will select a date & time for a virtual consultation to discuss your needs, view your space, provide you a quote, and get you booked in with us!</p>
-                                                <div class="signature">
-                                                    <p><strong>Thank you,</strong></p>
-                                                    <p class="company-name">Phambili Ma-Africa - Trading Enterprise</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <form method="POST" action="services.php" id="service-booking-form" class="booking-form">
-                                        <input type="hidden" name="service_id" value="<?php echo $selected_service['ID']; ?>">
+                                <form id="service-booking-form" class="booking-form">
+                                    <input type="hidden" name="service_id" id="bookingServiceId" value="">
 
                                         <!-- Service Details Section -->
                                         <div class="form-section">
@@ -931,9 +434,7 @@ $user_email = $_SESSION['user_email'] ?? '';
                                             <div class="date-time-group">
                                                 <div class="form-group">
                                                     <label for="booking_date">Preferred Date</label>
-                                                    <input type="date" id="booking_date" name="booking_date"
-                                                        min="<?php echo date('Y-m-d'); ?>" required>
-                                                    <input type="hidden" id="service_id" name="service_id" value="<?php echo $selected_service['ID']; ?>">
+                                                    <input type="date" id="booking_date" name="booking_date" required>
                                                     <div id="service-calendar-container"></div>
                                                 </div>
                                                 <div class="form-group">
@@ -962,25 +463,21 @@ $user_email = $_SESSION['user_email'] ?? '';
                                             </h3>
                                             <div class="form-group">
                                                 <label for="address_street">Street Address</label>
-                                                <input type="text" id="address_street" name="address_street"
-                                                    value="<?php echo htmlspecialchars($user_address_street); ?>" placeholder="Enter your street address" required>
+                                                <input type="text" id="address_street" name="address_street" placeholder="Enter your street address" required>
                                             </div>
                                             <div class="form-row">
                                                 <div class="form-group">
                                                     <label for="address_city">City</label>
-                                                    <input type="text" id="address_city" name="address_city"
-                                                        value="<?php echo htmlspecialchars($user_address_city); ?>" placeholder="City" required>
+                                                    <input type="text" id="address_city" name="address_city" placeholder="City" required>
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="address_state">State</label>
-                                                    <input type="text" id="address_state" name="address_state"
-                                                        value="<?php echo htmlspecialchars($user_address_state); ?>" placeholder="State" required>
+                                                    <input type="text" id="address_state" name="address_state" placeholder="State" required>
                                                 </div>
                                             </div>
                                             <div class="form-group">
                                                 <label for="address_postal">Postal Code</label>
-                                                <input type="text" id="address_postal" name="address_postal"
-                                                    value="<?php echo htmlspecialchars($user_address_postal); ?>" placeholder="Postal Code" required>
+                                                <input type="text" id="address_postal" name="address_postal" placeholder="Postal Code" required>
                                             </div>
                                         </div>
 
@@ -1004,27 +501,23 @@ $user_email = $_SESSION['user_email'] ?? '';
                                             <div class="form-row">
                                                 <div class="form-group">
                                                     <label for="customer_name">Full Name</label>
-                                                    <input type="text" id="customer_name" name="customer_name"
-                                                        value="<?php echo htmlspecialchars($user_name); ?>" required>
+                                                    <input type="text" id="customer_name" name="customer_name" required>
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="customer_phone">Phone Number</label>
-                                                    <input type="tel" id="customer_phone" name="customer_phone"
-                                                        value="<?php echo htmlspecialchars($user_phone); ?>" required>
+                                                    <input type="tel" id="customer_phone" name="customer_phone" required>
                                                 </div>
                                             </div>
                                             <div class="form-group">
                                                 <label for="customer_email">Email Address</label>
-                                                <input type="email" id="customer_email" name="customer_email"
-                                                    value="<?php echo htmlspecialchars($user_email); ?>" required>
+                                                <input type="email" id="customer_email" name="customer_email" required>
                                             </div>
                                         </div>
 
                                         <!-- Form Actions -->
                                         <div class="form-actions">
-                                            <a href="services.php<?php echo $search ? '?search=' . urlencode($search) : ''; ?><?php echo $category_filter !== 'all' ? ($search ? '&' : '?') . 'category=' . urlencode($category_filter) : ''; ?>"
-                                                class="btn-cancel">Cancel</a>
-                                            <button type="submit" name="request_quotation" class="submit-btn">
+                                            <a href="services.php" class="btn-cancel">Cancel</a>
+                                            <button type="submit" name="request_quotation" class="submit-btn" id="bookingSubmitBtn">
                                                 <i class="fas fa-paper-plane"></i> Request Quotation
                                             </button>
                                         </div>
@@ -1037,7 +530,6 @@ $user_email = $_SESSION['user_email'] ?? '';
                             </div>
                         </div>
                     </div>
-                <?php endif; ?>
             </div>
         </section>
     </main>
@@ -1198,289 +690,209 @@ $user_email = $_SESSION['user_email'] ?? '';
 
     <script src="./js/script.js"></script>
     <script src="./js/booking-calendar.js"></script>
-    <script>
-        // Handle Book Now button click for non-logged-in users
-        function handleBookNow(serviceId) {
-            // Check if user is logged in
-            if (!<?php echo $is_logged_in ? 'true' : 'false'; ?>) {
-                showNotification('Please sign in to book services', 'error');
-                // Redirect to login page after a short delay
-                setTimeout(() => {
-                    window.location.href = 'login.php?redirect=services.php&book=' + serviceId;
-                }, 1500);
+    <script src="./js/config.js"></script>
+    <script type="module" src="./js/firebase/ui.js"></script>
+    <script type="module" src="./js/firebase/notifications.js"></script>
+    <script type="module">
+        import { watchServices, createRequest } from './js/firebase/data.js';
+        import { onAuth } from './js/firebase/auth.js';
+        import { showMessage } from './js/firebase/ui.js';
+
+        const grid = document.getElementById('servicesGrid');
+        const resultsCount = document.getElementById('resultsCount');
+        const lastUpdated = document.getElementById('lastUpdated');
+        const searchInput = document.getElementById('serviceSearch');
+        const categorySel = document.getElementById('category');
+        const sortSel = document.getElementById('sort');
+        const messages = document.getElementById('pageMessages');
+        const popup = document.getElementById('service-popup');
+        const bookingForm = document.getElementById('service-booking-form');
+
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const params = new URLSearchParams(location.search);
+        let allServices = [];
+        let user = null;
+        let profile = null;
+
+        const durationText = m => {
+            m = Number(m) || 60;
+            return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m} min`;
+        };
+
+        const badgeFor = svc => {
+            const n = (svc.Name || '').toLowerCase();
+            if (n === 'deep cleaning') return 'popular';
+            if (n === 'office cleaning') return 'trending';
+            return '';
+        };
+
+        function filtered() {
+            const q = searchInput.value.trim().toLowerCase();
+            const cat = categorySel.value;
+            let list = allServices.filter(s => {
+                const matchesCat = cat === 'all' || (s.Category || 'General').toLowerCase() === cat.toLowerCase();
+                const matchesQ = !q || (s.Name || '').toLowerCase().includes(q) || (s.Description || '').toLowerCase().includes(q);
+                return matchesCat && matchesQ;
+            });
+            if (sortSel.value === 'name') list = [...list].sort((a, b) => (a.Name || '').localeCompare(b.Name || ''));
+            else if (sortSel.value === 'duration') list = [...list].sort((a, b) => (a.Duration || 0) - (b.Duration || 0));
+            return list;
+        }
+
+        function render() {
+            const list = filtered();
+            resultsCount.textContent = `${list.length} service${list.length !== 1 ? 's' : ''} available`;
+            if (!list.length) {
+                grid.innerHTML = `
+                    <div class="no-results" id="noResults" style="display: block;">
+                        <div class="no-results-content">
+                            <i class="fas fa-search"></i>
+                            <h3>No Services Found</h3>
+                            <p>We couldn't find any services matching your criteria. Try adjusting your search or filters.</p>
+                            <a href="services.php" class="btn btn-primary"><i class="fas fa-refresh"></i> Reset Filters</a>
+                        </div>
+                    </div>`;
                 return;
             }
+            grid.innerHTML = list.map(s => {
+                const available = !!s.Is_Available;
+                const badge = badgeFor(s);
+                const id = s.ID;
+                const img = s.Image_URL || '';
+                return `
+                <div class="service-card animate-in ${available ? '' : 'service-unavailable'}" data-service-id="${esc(id)}">
+                    ${!available ? '<span class="service-badge unavailable">Unavailable</span>'
+                        : badge ? `<span class="service-badge ${badge}">${badge[0].toUpperCase() + badge.slice(1)}</span>` : ''}
+                    <div class="service-image-container">
+                        ${img ? `<img src="${esc(img)}" alt="${esc(s.Name)}"><div class="image-placeholder" style="display:none;"><i class="fas fa-broom"></i></div>`
+                            : `<div class="service-image-placeholder"><i class="fas fa-broom"></i></div>`}
+                    </div>
+                    <div class="service-content">
+                        <h3>${esc(s.Name)}</h3>
+                        <p>${esc(s.Description || 'Professional cleaning service')}</p>
+                        <div class="service-features">
+                            <span class="feature-tag"><i class="fas fa-clock"></i> ${durationText(s.Duration)}</span>
+                            <span class="feature-tag"><i class="fas fa-star"></i> Professional</span>
+                            <span class="feature-tag"><i class="fas fa-shield-alt"></i> Insured</span>
+                        </div>
+                        <div class="service-footer">
+                            <div class="price-container"><span class="price-note">Custom Quote</span></div>
+                            ${!available
+                                ? '<span class="service-cta-btn service-unavailable-btn"><i class="fas fa-ban"></i> Currently Unavailable</span>'
+                                : `<a href="javascript:void(0)" class="service-cta-btn book-btn" data-id="${esc(id)}">Book Now</a>`}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
         }
 
-        // Show notification function
-        function showNotification(message, type = 'success') {
-            // Create notification element
-            const notification = document.createElement('div');
-            notification.className = 'notification ' + type;
-            notification.innerHTML = `
-                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-                <span>${message}</span>
-            `;
-
-            // Add to page
-            document.body.appendChild(notification);
-
-            // Show notification
-            setTimeout(() => {
-                notification.classList.add('show');
-            }, 10);
-
-            // Hide and remove after 3 seconds
-            setTimeout(() => {
-                notification.classList.remove('show');
-                setTimeout(() => {
-                    notification.remove();
-                }, 400);
-            }, 3000);
+        function fillCategories() {
+            const cats = [...new Set(allServices.map(s => s.Category).filter(Boolean))];
+            cats.forEach(c => {
+                const o = document.createElement('option');
+                o.value = c; o.textContent = c;
+                categorySel.appendChild(o);
+            });
+            if (params.get('category')) categorySel.value = params.get('category');
         }
 
-        // Check if user just booked a service and redirect to bookings after showing message
-        document.addEventListener('DOMContentLoaded', function() {
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('booked') === '1') {
-                // Show success message
-                setTimeout(() => {
-                    window.location.href = 'bookings.php';
-                }, 3000);
+        function openBooking(serviceId) {
+            const svc = allServices.find(s => s.ID === serviceId);
+            if (!svc) return;
+            document.getElementById('bookingServiceId').value = serviceId;
+            document.getElementById('popupServiceName').textContent = svc.Name || '';
+            document.getElementById('popupServiceDuration').textContent = durationText(svc.Duration);
+            document.getElementById('popupServiceDescription').textContent =
+                svc.Description || 'Professional cleaning service tailored to your needs. Our experienced team uses eco-friendly products and advanced techniques to deliver exceptional results every time.';
+            document.getElementById('popupServiceImage').innerHTML = svc.Image_URL
+                ? `<img src="${esc(svc.Image_URL)}" alt="${esc(svc.Name)}">`
+                : '<div class="image-placeholder"><i class="fas fa-concierge-bell"></i></div>';
+            if (profile) {
+                document.getElementById('customer_name').value = `${profile.firstName || ''} ${profile.lastName || ''}`.trim() || user?.displayName || '';
+                document.getElementById('customer_phone').value = profile.phone || '';
+                document.getElementById('customer_email').value = profile.email || user?.email || '';
+                document.getElementById('address_street').value = profile.address?.street || '';
+                document.getElementById('address_city').value = profile.address?.city || '';
+                document.getElementById('address_state').value = profile.address?.state || '';
+                document.getElementById('address_postal').value = profile.address?.postal || '';
             }
+            const dateInput = document.getElementById('booking_date');
+            dateInput.min = new Date().toISOString().split('T')[0];
+            popup.style.display = '';
+            popup.classList.add('active');
+            popup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
-            // Check for booking error and show as notification
-            <?php if ($bookingError): ?>
-                showNotification('<?php echo htmlspecialchars($bookingError); ?>', 'error');
-            <?php endif; ?>
+        grid.addEventListener('click', e => {
+            const btn = e.target.closest('.book-btn');
+            if (!btn) return;
+            if (!user) {
+                location.href = `login.php?redirect=services.php&book=${encodeURIComponent(btn.dataset.id)}`;
+                return;
+            }
+            openBooking(btn.dataset.id);
         });
 
-        // Customer notification dropdown functionality
-        function toggleCustomerNotificationDropdown() {
-            const dropdown = document.getElementById('notificationDropdownCustomer');
-            if (dropdown) {
-                dropdown.classList.toggle('active');
-            }
-        }
+        [searchInput, categorySel, sortSel].forEach(el => el.addEventListener('input', render));
 
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            const notificationBell = document.querySelector('.notification-bell-customer');
-            if (notificationBell && !notificationBell.contains(event.target)) {
-                const dropdown = document.getElementById('notificationDropdownCustomer');
-                if (dropdown) {
-                    dropdown.classList.remove('active');
-                }
+        bookingForm.addEventListener('submit', async e => {
+            e.preventDefault();
+            const btn = document.getElementById('bookingSubmitBtn');
+            btn.disabled = true;
+            try {
+                const fd = new FormData(bookingForm);
+                const svc = allServices.find(s => s.ID === fd.get('service_id')) || {};
+                const parts = [fd.get('address_street'), fd.get('address_city'), fd.get('address_state'), fd.get('address_postal')]
+                    .map(x => String(x || '').trim()).filter(Boolean);
+                const req = await createRequest(profile, {
+                    serviceId: svc.ID,
+                    serviceName: svc.Name || '',
+                    customerName: fd.get('customer_name'),
+                    customerPhone: fd.get('customer_phone'),
+                    customerEmail: fd.get('customer_email'),
+                    requestedDate: fd.get('booking_date'),
+                    requestedTime: fd.get('booking_time'),
+                    siteAddress: parts.join(', '),
+                    addressStreet: fd.get('address_street'),
+                    addressCity: fd.get('address_city'),
+                    addressState: fd.get('address_state'),
+                    addressPostal: fd.get('address_postal'),
+                    propertyType: fd.get('property_type'),
+                    cleaningFrequency: fd.get('cleaning_frequency'),
+                    specialInstructions: fd.get('special_requests') || '',
+                    quoteRequested: true,
+                });
+                popup.classList.remove('active');
+                popup.style.display = 'none';
+                showMessage(`Quotation request ${req.refNumber} submitted! You will receive a confirmation shortly.`, 'success', messages);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (err) {
+                console.error(err);
+                showMessage('Could not submit your request. Please try again.', 'error', messages);
+            } finally {
+                btn.disabled = false;
             }
         });
 
-        // Mark individual notification as read
-        async function markCustomerNotificationRead(notificationId) {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_read',
-                        notification_id: notificationId
-                    })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const notifItem = document.querySelector(`[data-id="${notificationId}"]`);
-                    if (notifItem) {
-                        notifItem.style.opacity = '0';
-                        setTimeout(() => notifItem.remove(), 300);
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        const currentCount = parseInt(badge.textContent);
-                        if (currentCount > 1) {
-                            badge.textContent = currentCount - 1;
-                        } else {
-                            badge.remove();
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
+        watchServices(services => {
+            allServices = services;
+            fillCategories();
+            render();
+            lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+        });
+
+        onAuth(({ user: u, profile: p }) => {
+            user = u;
+            profile = p;
+            const bookId = params.get('book');
+            if (bookId && u) openBooking(bookId);
+            else if (bookId && !u) {
+                showMessage('Please log in to request a quotation.', 'info', messages);
             }
-        }
-
-        // Mark all notifications as read
-        async function markAllCustomerNotificationsRead() {
-            try {
-                const response = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_all_read'
-                    })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    const dropdownContent = document.querySelector('.notification-dropdown-customer .notification-dropdown-content');
-                    if (dropdownContent) {
-                        dropdownContent.innerHTML = '<div class="no-notifications"><i class="fas fa-bell-slash"></i><p>No new notifications</p></div>';
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        badge.remove();
-                    }
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        }
-
-        // Real-time booking form validation
-        document.addEventListener('DOMContentLoaded', function() {
-            const bookingDateInput = document.getElementById('booking_date');
-            const bookingTimeSelect = document.getElementById('booking_time');
-            const form = document.getElementById('booking-form');
-
-            // Phone number input filtering - only allow digits, max 10 chars
-            const phoneInput = document.getElementById('customer_phone');
-            if (phoneInput) {
-                phoneInput.addEventListener('input', function(e) {
-                    // Remove all non-digit characters
-                    let value = this.value.replace(/\D/g, '');
-                    // Limit to 10 digits
-                    if (value.length > 10) {
-                        value = value.substring(0, 10);
-                    }
-                    this.value = value;
-                });
-
-                // Prevent paste of non-digits
-                phoneInput.addEventListener('paste', function(e) {
-                    e.preventDefault();
-                    const pasted = (e.clipboardData || window.clipboardData).getData('text');
-                    const digitsOnly = pasted.replace(/\D/g, '').substring(0, 10);
-                    this.value = digitsOnly;
-                });
-            }
-
-            if (bookingDateInput && bookingTimeSelect) {
-                // Get current date/time
-                const now = new Date();
-                const today = now.toISOString().split('T')[0];
-                const currentHour = now.getHours();
-
-                // Set minimum date based on current time
-                // If after 12 PM, minimum date is tomorrow
-                if (currentHour >= 12) {
-                    const tomorrow = new Date(now);
-                    tomorrow.setDate(tomorrow.getDate() + 1);
-                    bookingDateInput.min = tomorrow.toISOString().split('T')[0];
-                } else {
-                    bookingDateInput.min = today;
-                }
-
-                // Validate date selection
-                bookingDateInput.addEventListener('change', function() {
-                    validateBookingDateTime();
-                });
-
-                // Validate time selection
-                bookingTimeSelect.addEventListener('change', function() {
-                    validateBookingDateTime();
-                });
-
-                function validateBookingDateTime() {
-                    const selectedDate = bookingDateInput.value;
-                    const selectedTime = bookingTimeSelect.value;
-
-                    // Remove existing error messages
-                    const existingError = document.getElementById('realtime-validation-error');
-                    if (existingError) {
-                        existingError.remove();
-                    }
-
-                    if (!selectedDate) return;
-
-                    const now = new Date();
-                    const today = now.toISOString().split('T')[0];
-                    const currentHour = now.getHours();
-                    const currentTime = now.getHours() * 60 + now.getMinutes();
-
-                    let errorMessage = '';
-
-                    // Check if today is selected after 12 PM
-                    if (selectedDate === today && currentHour >= 12) {
-                        errorMessage = 'Same-day bookings must be made before 12:00 PM. Please select tomorrow or a later date.';
-                    }
-
-                    // Check if selected time has already passed today
-                    if (selectedDate === today && selectedTime) {
-                        const [hours, minutes] = selectedTime.split(':').map(Number);
-                        const selectedTimeMinutes = hours * 60 + minutes;
-                        if (selectedTimeMinutes <= currentTime) {
-                            errorMessage = 'Cannot book for past times. Please select a future time.';
-                        }
-                    }
-
-                    if (errorMessage) {
-                        // Show error message
-                        const errorDiv = document.createElement('div');
-                        errorDiv.id = 'realtime-validation-error';
-                        errorDiv.className = 'alert alert-error';
-                        errorDiv.style.position = 'relative';
-                        errorDiv.style.marginBottom = '1rem';
-                        errorDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + errorMessage;
-
-                        const formContent = form.querySelector('.form-content');
-                        if (formContent) {
-                            formContent.insertBefore(errorDiv, formContent.firstChild);
-                        }
-
-                        // Clear invalid selections
-                        if (selectedDate === today && currentHour >= 12) {
-                            bookingDateInput.value = '';
-                        }
-                    }
-                }
-
-                // Filter time options based on selected date
-                function updateTimeOptions() {
-                    const selectedDate = bookingDateInput.value;
-                    if (!selectedDate) return;
-
-                    const now = new Date();
-                    const today = now.toISOString().split('T')[0];
-                    const currentHour = now.getHours();
-                    const currentTime = now.getHours() * 60 + now.getMinutes();
-
-                    const options = bookingTimeSelect.querySelectorAll('option:not([value=""])');
-
-                    options.forEach(option => {
-                        const timeValue = option.value;
-                        const [hours, minutes] = timeValue.split(':').map(Number);
-                        const optionTimeMinutes = hours * 60 + minutes;
-
-                        if (selectedDate === today) {
-                            // Disable past times for today
-                            if (optionTimeMinutes <= currentTime) {
-                                option.disabled = true;
-                                option.style.color = '#999';
-                            } else {
-                                option.disabled = false;
-                                option.style.color = '';
-                            }
-                        } else {
-                            // Enable all options for future dates
-                            option.disabled = false;
-                            option.style.color = '';
-                        }
-                    });
-                }
-
-                bookingDateInput.addEventListener('change', updateTimeOptions);
-                updateTimeOptions(); // Initial call
+            const highlight = params.get('id');
+            if (highlight) {
+                const card = grid.querySelector(`[data-service-id="${CSS.escape(highlight)}"]`);
+                if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
         });
     </script>

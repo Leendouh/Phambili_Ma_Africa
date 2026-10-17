@@ -1,295 +1,3 @@
-<?php
-require_once 'includes/config_session.inc.php';
-require_once 'includes/dbh.inc.php';
-if (!isset($_SESSION['user_id'])) {
-    header("Location: login.php");
-    exit();
-}
-$user_id = $_SESSION['user_id'];
-$user_role = $_SESSION['user_role'] ?? 'customer';
-$user_name = $_SESSION['user_name'] ?? 'User';
-function getRelativeDate($dateString)
-{
-    $date = new DateTime($dateString);
-    $today = new DateTime('today');
-    $yesterday = new DateTime('yesterday');
-    $diff = $today->diff($date);
-    $date->setTime(0, 0, 0);
-    $today->setTime(0, 0, 0);
-    $yesterday->setTime(0, 0, 0);
-    if ($date == $today) return 'Today';
-    elseif ($date == $yesterday) return 'Yesterday';
-    elseif ($diff->days == 2) return 'Day before yesterday';
-    elseif ($diff->days <= 7) return $date->format('l');
-    else return $date->format('M d, Y');
-}
-try {
-    $stmt = $pdo->prepare("SELECT b.*, s.Name as Service_Name, s.Description as Service_Description, s.Image_URL as Service_Image FROM bookings b LEFT JOIN services s ON b.Service_ID = s.ID WHERE b.Customer_ID = ? ORDER BY b.created_at DESC, b.Date DESC");
-    $stmt->execute([$user_id]);
-    $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    error_log("Error fetching bookings: " . $e->getMessage());
-    $bookings = [];
-}
-$filter_status = $_GET['status'] ?? 'all';
-$filtered_bookings = $bookings;
-if ($filter_status !== 'all') {
-    $filtered_bookings = array_filter($bookings, function ($booking) use ($filter_status) {
-        return strtolower($booking['Status'] ?? 'requested') === $filter_status;
-    });
-}
-$status_counts = ['all' => count($bookings), 'requested' => 0, 'contacted' => 0, 'in_progress' => 0, 'quoted' => 0, 'confirmed' => 0, 'completed' => 0, 'cancelled' => 0, 'expired' => 0];
-foreach ($bookings as $booking) {
-    $status = strtolower($booking['Status'] ?? 'requested');
-    if (isset($status_counts[$status])) $status_counts[$status]++;
-}
-$bookingMessage = '';
-$bookingError = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && isset($_POST['booking_id'])) {
-    $action = $_POST['action'];
-    $booking_id = (int)$_POST['booking_id'];
-    if ($action === 'cancel' || $action === 'decline') {
-        try {
-            $stmt = $pdo->prepare("SELECT Status FROM bookings WHERE ID = ? AND Customer_ID = ?");
-            $stmt->execute([$booking_id, $user_id]);
-            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($booking) {
-                $status = strtolower(trim($booking['Status']));
-                if ($action === 'cancel' && ($status === 'requested' || $status === 'confirmed')) {
-                    $stmt = $pdo->prepare("UPDATE bookings SET Status = 'cancelled' WHERE ID = ?");
-                    $stmt->execute([$booking_id]);
-                    require_once 'includes/notifications_model.inc.php';
-                    $admins_query = "SELECT ID FROM admins";
-                    $admins_stmt = $pdo->prepare($admins_query);
-                    $admins_stmt->execute();
-                    $admins = $admins_stmt->fetchAll(PDO::FETCH_ASSOC);
-                    foreach ($admins as $admin) {
-                        create_notification($pdo, $admin['ID'], 'admin', 'Booking Cancelled', "Booking #{$booking_id} has been cancelled by the customer.", 'booking');
-                    }
-                    echo "Booking cancelled successfully";
-                    exit();
-                } elseif ($action === 'decline' && $status === 'quoted') {
-                    $stmt = $pdo->prepare("UPDATE bookings SET Status = 'cancelled' WHERE ID = ?");
-                    $stmt->execute([$booking_id]);
-                    echo "Quote declined successfully";
-                    exit();
-                } else {
-                    echo "This booking cannot be cancelled";
-                    exit();
-                }
-            } else {
-                echo "Booking not found";
-                exit();
-            }
-        } catch (PDOException $e) {
-            error_log("Booking action error: " . $e->getMessage());
-            echo "Database error";
-            exit();
-        }
-    }
-}
-$view_booking_id = isset($_GET['view']) ? (int)$_GET['view'] : 0;
-$view_booking = null;
-if ($view_booking_id > 0) {
-    foreach ($bookings as $booking) {
-        if ($booking['ID'] == $view_booking_id) {
-            $view_booking = $booking;
-            break;
-        }
-    }
-}
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_booking']) && isset($_POST['booking_id'])) {
-    $booking_id = (int)$_POST['booking_id'];
-    $new_date = trim($_POST['booking_date'] ?? '');
-    $new_time = trim($_POST['booking_time'] ?? '');
-    $new_address = trim($_POST['address'] ?? '');
-    $new_instructions = trim($_POST['special_instructions'] ?? '');
-    $is_ajax = isset($_POST['ajax']) && $_POST['ajax'] === 'true';
-    try {
-        $check_stmt = $pdo->prepare("SELECT * FROM bookings WHERE ID = ? AND Customer_ID = ? AND Status = 'requested'");
-        $check_stmt->execute([$booking_id, $user_id]);
-        $booking = $check_stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$booking) {
-            $error = "Quotation not found or cannot be edited. Only 'requested' quotations can be edited.";
-            if ($is_ajax) {
-                echo json_encode(['success' => false, 'message' => $error]);
-                exit();
-            }
-            $bookingError = $error;
-        } elseif (empty($new_date) || empty($new_time)) {
-            $error = "Date and time are required.";
-            if ($is_ajax) {
-                echo json_encode(['success' => false, 'message' => $error]);
-                exit();
-            }
-            $bookingError = $error;
-        } else {
-            $booking_timestamp = strtotime($new_date . ' ' . $new_time);
-            $now = time();
-            $current_hour = (int)date('H');
-            if ($booking_timestamp < $now) {
-                $error = "Cannot book for past dates or times.";
-                if ($is_ajax) {
-                    echo json_encode(['success' => false, 'message' => $error]);
-                    exit();
-                }
-                $bookingError = $error;
-            } elseif ($new_date === date('Y-m-d') && $current_hour >= 12) {
-                $error = "Same-day bookings must be made before 12:00 PM.";
-                if ($is_ajax) {
-                    echo json_encode(['success' => false, 'message' => $error]);
-                    exit();
-                }
-                $bookingError = $error;
-            } else {
-                $update_stmt = $pdo->prepare("UPDATE bookings SET Date = ?, Time = ?, Address = ?, Special_Instructions = ? WHERE ID = ?");
-                $update_stmt->execute([$new_date, $new_time, $new_address, $new_instructions, $booking_id]);
-                if ($is_ajax) {
-                    echo json_encode(['success' => true, 'message' => 'Quotation updated successfully']);
-                    exit();
-                }
-                $bookingMessage = "Quotation updated successfully.";
-            }
-        }
-    } catch (PDOException $e) {
-        error_log("Update booking error: " . $e->getMessage());
-        $bookingError = "Database error: " . $e->getMessage();
-    }
-}
-if (isset($_GET['cancel']) && is_numeric($_GET['cancel'])) {
-    $booking_id = (int)$_GET['cancel'];
-    try {
-        $stmt = $pdo->prepare("SELECT Status FROM bookings WHERE ID = ? AND Customer_ID = ?");
-        $stmt->execute([$booking_id, $user_id]);
-        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($booking) {
-            $status = strtolower($booking['Status']);
-            if ($status === 'requested' || $status === 'confirmed') {
-                $stmt = $pdo->prepare("UPDATE bookings SET Status = 'cancelled' WHERE ID = ?");
-                $stmt->execute([$booking_id]);
-                $bookingMessage = "Booking cancelled successfully.";
-                require_once 'includes/notifications_model.inc.php';
-                $admins_query = "SELECT ID FROM admins";
-                $admins_stmt = $pdo->prepare($admins_query);
-                $admins_stmt->execute();
-                $admins = $admins_stmt->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($admins as $admin) {
-                    create_notification($pdo, $admin['ID'], 'admin', 'Booking Cancelled', "Booking #{$booking_id} has been cancelled by the customer.", 'booking');
-                }
-                $stmt = $pdo->prepare("SELECT b.*, s.Name as Service_Name, s.Description as Service_Description, s.Image_URL as Service_Image FROM bookings b LEFT JOIN services s ON b.Service_ID = s.ID WHERE b.Customer_ID = ? ORDER BY b.Booking_Date DESC, b.Created_At DESC");
-                $stmt->execute([$user_id]);
-                $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                $status_counts = ['all' => count($bookings), 'requested' => 0, 'contacted' => 0, 'in_progress' => 0, 'quoted' => 0, 'confirmed' => 0, 'completed' => 0, 'cancelled' => 0, 'expired' => 0];
-                foreach ($bookings as $b) {
-                    $s = strtolower($b['Status'] ?? 'requested');
-                    if (isset($status_counts[$s])) $status_counts[$s]++;
-                }
-                if ($filter_status !== 'all') {
-                    $filtered_bookings = array_filter($bookings, function ($b) use ($filter_status) {
-                        return strtolower($b['Status'] ?? 'requested') === $filter_status;
-                    });
-                }
-            } else {
-                $bookingError = "This booking cannot be cancelled.";
-            }
-        } else {
-            $bookingError = "Booking not found.";
-        }
-    } catch (PDOException $e) {
-        error_log("Cancel booking error: " . $e->getMessage());
-    }
-}
-if (isset($_GET['approve']) && is_numeric($_GET['approve'])) {
-    $booking_id = (int)$_GET['approve'];
-    try {
-        $stmt = $pdo->prepare("SELECT Status FROM bookings WHERE ID = ? AND Customer_ID = ?");
-        $stmt->execute([$booking_id, $user_id]);
-        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($booking && strtolower($booking['Status']) === 'quoted') {
-            $stmt = $pdo->prepare("UPDATE bookings SET Status = 'confirmed' WHERE ID = ?");
-            $stmt->execute([$booking_id]);
-            $bookingMessage = "Quote approved! Your booking is now confirmed.";
-            require_once 'includes/notifications_model.inc.php';
-            $admins_query = "SELECT ID FROM admins";
-            $admins_stmt = $pdo->prepare($admins_query);
-            $admins_stmt->execute();
-            $admins = $admins_stmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($admins as $admin) {
-                create_notification($pdo, $admin['ID'], 'admin', 'Booking Confirmed', "Booking #{$booking_id} has been confirmed by the customer.", 'booking');
-            }
-            $stmt = $pdo->prepare("SELECT b.*, s.Name as Service_Name, s.Description as Service_Description, s.Image_URL as Service_Image FROM bookings b LEFT JOIN services s ON b.Service_ID = s.ID WHERE b.Customer_ID = ? ORDER BY b.Booking_Date DESC, b.Created_At DESC");
-            $stmt->execute([$user_id]);
-            $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $status_counts = ['all' => count($bookings), 'requested' => 0, 'contacted' => 0, 'in_progress' => 0, 'quoted' => 0, 'confirmed' => 0, 'completed' => 0, 'cancelled' => 0, 'expired' => 0];
-            foreach ($bookings as $b) {
-                $s = strtolower($b['Status'] ?? 'requested');
-                if (isset($status_counts[$s])) $status_counts[$s]++;
-            }
-            if ($filter_status !== 'all') {
-                $filtered_bookings = array_filter($bookings, function ($b) use ($filter_status) {
-                    return strtolower($b['Status'] ?? 'requested') === $filter_status;
-                });
-            }
-        } else {
-            $bookingError = "This quote cannot be approved.";
-        }
-    } catch (PDOException $e) {
-        error_log("Approve quote error: " . $e->getMessage());
-    }
-}
-if (isset($_GET['decline']) && is_numeric($_GET['decline'])) {
-    $booking_id = (int)$_GET['decline'];
-    try {
-        $stmt = $pdo->prepare("SELECT Status FROM bookings WHERE ID = ? AND Customer_ID = ?");
-        $stmt->execute([$booking_id, $user_id]);
-        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($booking && strtolower($booking['Status']) === 'quoted') {
-            $stmt = $pdo->prepare("UPDATE bookings SET Status = 'cancelled' WHERE ID = ?");
-            $stmt->execute([$booking_id]);
-            $bookingMessage = "Quote declined.";
-            require_once 'includes/notifications_model.inc.php';
-            $admins_query = "SELECT ID FROM admins";
-            $admins_stmt = $pdo->prepare($admins_query);
-            $admins_stmt->execute();
-            $admins = $admins_stmt->fetchAll(PDO::FETCH_ASSOC);
-            foreach ($admins as $admin) {
-                create_notification($pdo, $admin['ID'], 'admin', 'Quote Declined', "The customer has declined the quote for booking #{$booking_id}.", 'booking');
-            }
-            $stmt = $pdo->prepare("SELECT b.*, s.Name as Service_Name, s.Description as Service_Description, s.Image_URL as Service_Image FROM bookings b LEFT JOIN services s ON b.Service_ID = s.ID WHERE b.Customer_ID = ? ORDER BY b.Booking_Date DESC, b.Created_At DESC");
-            $stmt->execute([$user_id]);
-            $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $status_counts = ['all' => count($bookings), 'requested' => 0, 'contacted' => 0, 'in_progress' => 0, 'quoted' => 0, 'confirmed' => 0, 'completed' => 0, 'cancelled' => 0, 'expired' => 0];
-            foreach ($bookings as $b) {
-                $s = strtolower($b['Status'] ?? 'requested');
-                if (isset($status_counts[$s])) $status_counts[$s]++;
-            }
-            if ($filter_status !== 'all') {
-                $filtered_bookings = array_filter($bookings, function ($b) use ($filter_status) {
-                    return strtolower($b['Status'] ?? 'requested') === $filter_status;
-                });
-            }
-        } else {
-            $bookingError = "This quote cannot be declined.";
-        }
-    } catch (PDOException $e) {
-        error_log("Decline quote error: " . $e->getMessage());
-    }
-}
-$user_id = $_SESSION['user_id'] ?? null;
-$user_name = $_SESSION['user_name'] ?? '';
-$user_role = $_SESSION['user_role'] ?? '';
-$is_logged_in = isset($_SESSION['user_id']);
-$is_admin = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'admin';
-$is_customer = isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'customer';
-$user_email = $_SESSION['user_email'] ?? '';
-$notifications = [];
-$unreadCount = 0;
-if ($is_customer && $user_id) {
-    require_once 'includes/notifications_model.inc.php';
-    $notifications = get_notifications($pdo, $user_id, 'customer', true, 5);
-    $unreadCount = get_unread_notification_count($pdo, $user_id, 'customer');
-}
-?>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -327,32 +35,78 @@ if ($is_customer && $user_id) {
     </style>
 </head>
 
-<body class="bookings-page" data-is-logged-in="<?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>">
+<body class="bookings-page"">
     <header class="header"><button class="hamburger-btn" id="hamburger-btn" aria-label="Toggle menu"><img src="images/menu.png" alt="Close"></button>
         <div class="logo"><a href="index.php"><img src="images/PM-LogoB.png" alt="Phambili Ma-Africa Logo"></a></div>
-        <div class="header-icons"><?php if ($is_customer && $user_id): ?><div class="notification-bell-customer"><button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()"><i class="fas fa-bell"></i><?php if ($unreadCount > 0): ?><span class="notification-badge-customer"><?php echo $unreadCount; ?></span><?php endif; ?></button>
+        <div class="header-icons"><div class="notification-bell-customer" data-auth="role:customer">
+                    <button class="bell-btn-customer" onclick="toggleCustomerNotificationDropdown()">
+                        <i class="fas fa-bell"></i>
+                    </button>
                     <div class="notification-dropdown-customer" id="notificationDropdownCustomer">
                         <div class="notification-dropdown-header">
-                            <h4>Notifications</h4><button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
+                            <h4>Notifications</h4>
+                            <button class="mark-all-read-btn" onclick="markAllCustomerNotificationsRead()">Mark all read</button>
                         </div>
-                        <div class="notification-dropdown-content"><?php if (empty($notifications)): ?><div class="no-notifications"><i class="fas fa-bell-slash"></i>
-                                    <p>No new notifications</p>
-                                </div><?php else: ?><?php foreach ($notifications as $notif): ?><div class="notification-dropdown-item unread" data-id="<?php echo $notif['ID']; ?>">
-                                    <div class="notif-content"><strong><?php echo htmlspecialchars($notif['title']); ?></strong>
-                                        <p><?php echo htmlspecialchars($notif['message']); ?></p><small><?php echo date('M j, Y g:i A', strtotime($notif['created_at'])); ?></small>
-                                    </div><button class="notif-close" onclick="markCustomerNotificationRead(<?php echo $notif['ID']; ?>)"><i class="fas fa-times"></i></button>
-                                </div><?php endforeach; ?><?php endif; ?></div>
-                    </div>
-                </div><?php endif; ?><?php if ($is_logged_in): ?><div class="user-profile-dropdown" id="user-profile-dropdown"><button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn"><img src="images/user.png" alt="User" class="icon" id="user-icon"></button>
-                    <div class="profile-dropdown-menu" id="profile-dropdown-menu"><?php if ($is_admin): ?><div class="profile-dropdown-header"><i class="fas fa-user-shield admin-icon"></i>
-                                <div class="profile-info"><span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Administrator'); ?></span><span class="profile-role">Admin</span></div>
+                        <div class="notification-dropdown-content">
+                            <div class="no-notifications">
+                                <i class="fas fa-bell-slash"></i>
+                                <p>No new notifications</p>
                             </div>
-                            <div class="profile-dropdown-links"><a href="admin_dashboard.php" class="dropdown-link"><i class="fas fa-tachometer-alt"></i>Admin Dashboard</a><a href="includes/logout.inc.php" class="dropdown-link logout-link"><i class="fas fa-sign-out-alt"></i>Log Out</a></div><?php elseif ($is_customer): ?><div class="profile-dropdown-header"><i class="fas fa-user customer-icon"></i>
-                                <div class="profile-info"><span class="profile-name"><?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Customer'); ?></span><span class="profile-role">Customer</span></div>
-                            </div>
-                            <div class="profile-dropdown-links"><a href="bookings.php" class="dropdown-link"><i class="fas fa-calendar-check"></i>Bookings</a><a href="profile.php" class="dropdown-link"><i class="fas fa-user"></i>Profile</a><a href="includes/logout.inc.php" class="dropdown-link logout-link"><i class="fas fa-sign-out-alt"></i>Log Out</a></div><?php endif; ?>
+                        </div>
                     </div>
-                </div><?php else: ?><a href="login.php" class="icon-link" aria-label="Login/Register"><img src="images/user.png" alt="Login" class="icon"></a><?php endif; ?><button class="cart-btn" id="cart-btn" aria-label="Shopping Cart"><img src="images/shopping-bag.png" alt="" class="icon"><span class="cart-badge">0</span></button></div>
+                </div><div class="user-profile-dropdown" id="user-profile-dropdown" data-auth="in">
+                    <button class="icon-link user-profile-btn" aria-label="User Profile" id="user-profile-btn">
+                        <img src="images/user.png" alt="User" class="icon" id="user-icon">
+                    </button>
+                    <div class="profile-dropdown-menu" id="profile-dropdown-menu">
+                        <div data-auth="role:staff,admin,main_admin,super_admin">
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user-shield admin-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name" data-user-name>Administrator</span>
+                                    <span class="profile-role">Admin</span>
+                                </div>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="#" class="dropdown-link admin-app-link">
+                                    <i class="fas fa-tachometer-alt"></i>
+                                    Admin Dashboard
+                                </a>
+                                <a href="#" class="dropdown-link logout-link" data-logout>
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
+                        </div>
+                        <div data-auth="role:customer">
+                            <div class="profile-dropdown-header">
+                                <i class="fas fa-user customer-icon"></i>
+                                <div class="profile-info">
+                                    <span class="profile-name" data-user-name>Customer</span>
+                                    <span class="profile-role">Customer</span>
+                                </div>
+                            </div>
+                            <div class="profile-dropdown-links">
+                                <a href="bookings.php" class="dropdown-link">
+                                    <i class="fas fa-calendar-check"></i>
+                                    Bookings
+                                </a>
+                                <a href="profile.php" class="dropdown-link">
+                                    <i class="fas fa-user"></i>
+                                    Profile
+                                </a>
+                                <a href="#" class="dropdown-link logout-link" data-logout>
+                                    <i class="fas fa-sign-out-alt"></i>
+                                    Log Out
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Guest: Icon redirects to login page -->
+                <a href="login.php" class="icon-link" aria-label="Login/Register" data-auth="out">
+                    <img src="images/user.png" alt="Login" class="icon">
+                </a><button class="cart-btn" id="cart-btn" aria-label="Shopping Cart"><img src="images/shopping-bag.png" alt="" class="icon"><span class="cart-badge">0</span></button></div>
     </header>
     <div class="menu-overlay" id="menu-overlay"></div>
     <nav class="main-nav" id="main-nav">
@@ -366,10 +120,14 @@ if ($is_customer && $user_id) {
             <li class="nav-item"><a href="about.php" class="nav-link">About</a></li>
             <li class="nav-item"><a href="contact.php" class="nav-link">Contact</a></li>
             <li class="nav-item"><a href="services.php" class="nav-link">Services</a></li>
-            <li class="nav-item"><a href="products.php" class="nav-link">Products</a></li><?php if ($is_admin): ?><li class="nav-item"><a href="admin_dashboard.php" class="nav-link admin-nav-link">Admin Dashboard</a></li>
-                <li class="nav-item"><a href="includes/logout.inc.php" class="nav-link">Log Out</a></li><?php elseif ($is_customer): ?><li class="nav-item"><a href="bookings.php" class="nav-link">Bookings</a></li>
-                <li class="nav-item"><a href="profile.php" class="nav-link">Profile</a></li>
-                <li class="nav-item"><a href="includes/logout.inc.php" class="nav-link">Log Out</a></li><?php else: ?><li class="nav-item"><a href="login.php" class="nav-link">Log In</a></li><?php endif; ?><li class="nav-item"><a href="booking.php" class="nav-link book-now-btn">Book Now</a></li>
+            <li class="nav-item"><a href="products.php" class="nav-link">Products</a></li>
+            <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin"><a href="#" class="nav-link admin-nav-link admin-app-link">Admin Dashboard</a></li>
+            <li class="nav-item" data-auth="role:staff,admin,main_admin,super_admin"><a href="#" class="nav-link" data-logout>Log Out</a></li>
+            <li class="nav-item" data-auth="role:customer"><a href="bookings.php" class="nav-link">Bookings</a></li>
+            <li class="nav-item" data-auth="role:customer"><a href="profile.php" class="nav-link">Profile</a></li>
+            <li class="nav-item" data-auth="role:customer"><a href="#" class="nav-link" data-logout>Log Out</a></li>
+            <li class="nav-item" data-auth="out"><a href="login.php" class="nav-link">Log In</a></li>
+            <li class="nav-item"><a href="booking.php" class="nav-link book-now-btn">Book Now</a></li>
         </ul>
         <div class="nav-footer">
             <div class="social-links"><a href="https://www.facebook.com/people/Phambili-Ma-Africa/100063507009282/" target="_blank" aria-label="Facebook"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-facebook" viewBox="0 0 16 16">
@@ -414,46 +172,37 @@ if ($is_customer && $user_id) {
     </aside>
     <div class="menu-overlay" id="menu-overlay"></div>
     <main class="profile-main">
-        <div class="profile-container"><?php if ($bookingMessage): ?><div class="alert alert-success"><i class="fas fa-check-circle"></i> <?php echo htmlspecialchars($bookingMessage); ?></div><?php endif; ?><?php if ($bookingError): ?><div class="alert alert-error"><i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($bookingError); ?></div><?php endif; ?><div class="profile-header">
+        <div class="profile-container"><div id="pageMessages"></div><div class="profile-header">
                 <div class="profile-avatar">
                     <div class="avatar-circle"><i class="fas fa-calendar-check" style="font-size: 2rem;"></i></div>
                 </div>
                 <div class="profile-info-header">
                     <h1 class="profile-name">Bookings</h1>
-                    <p class="profile-email">View and manage your service bookings</p><span class="profile-role-badge"><?php echo count($bookings); ?> Total</span>
+                    <p class="profile-email">View and manage your service bookings</p><span class="profile-role-badge" id="bookingCountBadge">0 Total</span>
                 </div>
             </div>
             <div class="profile-section">
                 <div class="section-content" style="padding: 1rem;">
-                    <div class="booking-filters"><a href="bookings.php?status=all" class="filter-btn <?php echo $filter_status === 'all' ? 'active' : ''; ?>"><i class="fas fa-list"></i> All <span class="filter-count"><?php echo $status_counts['all']; ?></span></a><a href="bookings.php?status=requested" class="filter-btn <?php echo $filter_status === 'requested' ? 'active' : ''; ?>"><i class="fas fa-clock"></i> Requested <span class="filter-count"><?php echo $status_counts['requested']; ?></span></a><a href="bookings.php?status=confirmed" class="filter-btn <?php echo $filter_status === 'confirmed' ? 'active' : ''; ?>"><i class="fas fa-check"></i> Confirmed <span class="filter-count"><?php echo $status_counts['confirmed']; ?></span></a><a href="bookings.php?status=completed" class="filter-btn <?php echo $filter_status === 'completed' ? 'active' : ''; ?>"><i class="fas fa-check-circle"></i> Completed <span class="filter-count"><?php echo $status_counts['completed']; ?></span></a><a href="bookings.php?status=cancelled" class="filter-btn <?php echo $filter_status === 'cancelled' ? 'active' : ''; ?>"><i class="fas fa-times-circle"></i> Cancelled <span class="filter-count"><?php echo $status_counts['cancelled']; ?></span></a><a href="bookings.php?status=expired" class="filter-btn <?php echo $filter_status === 'expired' ? 'active' : ''; ?>"><i class="fas fa-clock"></i> Expired <span class="filter-count"><?php echo $status_counts['expired']; ?></span></a></div>
+                    <div class="booking-filters" id="bookingFilters">
+                        <a href="bookings.php?status=all" class="filter-btn" data-status="all"><i class="fas fa-list"></i> All <span class="filter-count" data-count="all">0</span></a>
+                        <a href="bookings.php?status=requested" class="filter-btn" data-status="requested"><i class="fas fa-clock"></i> Requested <span class="filter-count" data-count="requested">0</span></a>
+                        <a href="bookings.php?status=confirmed" class="filter-btn" data-status="confirmed"><i class="fas fa-check"></i> Confirmed <span class="filter-count" data-count="confirmed">0</span></a>
+                        <a href="bookings.php?status=completed" class="filter-btn" data-status="completed"><i class="fas fa-check-circle"></i> Completed <span class="filter-count" data-count="completed">0</span></a>
+                        <a href="bookings.php?status=cancelled" class="filter-btn" data-status="cancelled"><i class="fas fa-times-circle"></i> Cancelled <span class="filter-count" data-count="cancelled">0</span></a>
+                        <a href="bookings.php?status=expired" class="filter-btn" data-status="expired"><i class="fas fa-clock"></i> Expired <span class="filter-count" data-count="expired">0</span></a>
+                    </div>
                 </div>
             </div>
             <div class="profile-section" id="booking-history">
                 <div class="section-header">
-                    <h2><i class="fas fa-list"></i> <?php echo $filter_status === 'all' ? 'All Bookings' : ucfirst($filter_status) . ' Bookings'; ?></h2><a href="services.php" class="btn-bookings">Book More Services →</a>
+                    <h2><i class="fas fa-list"></i> <span id="filterTitle">All Bookings</span></h2><a href="services.php" class="btn-bookings">Book More Services →</a>
                 </div>
                 <div class="section-content">
-                    <div class="booking-history"><?php if (empty($filtered_bookings)): ?><div class="empty-state"><i class="fas fa-calendar-check empty-icon"></i>
-                                <h3>No Bookings Found</h3>
-                                <p><?php if ($filter_status === 'all'): ?>You haven't made any bookings yet. Start by booking our cleaning services!<?php else: ?>No <?php echo ucfirst($filter_status); ?> bookings found.<?php endif; ?></p><a href="services.php" class="btn-primary"><i class="fas fa-calendar-plus"></i> Book Services</a>
-                            </div><?php else: ?><div class="bookings-list"><?php foreach ($filtered_bookings as $booking): $status = strtolower($booking['Status'] ?? 'requested');
-                                                                                $status_class = 'status-' . $status;
-                                                                                $service_name = $booking['Service_Name'] ?? 'Service Booking';
-                                                                                $booking_date = getRelativeDate($booking['created_at']);
-                                                                                $booking_time = date('g:i A', strtotime($booking['Time'] ?? '09:00:00'));
-                                                                                $scheduled_date = date('F j, Y', strtotime($booking['Date'])); ?><div class="booking-card <?php echo $status_class; ?>">
-                                        <div class="booking-card-content"><?php if (!empty($booking['Service_Image'])): ?><div class="booking-image"><img src="<?php echo htmlspecialchars($booking['Service_Image']); ?>" alt="<?php echo htmlspecialchars($service_name); ?>"></div><?php endif; ?><div class="booking-details-main">
-                                                <div class="booking-card-header">
-                                                    <div class="booking-service-info">
-                                                        <h4 class="booking-service-name"><?php echo htmlspecialchars($service_name); ?></h4>
-                                                        <div class="booking-meta"><span class="booking-date"><i class="fas fa-calendar-plus"></i> <?php echo $booking_date; ?></span><span class="booking-date"><i class="fas fa-calendar-check"></i> <?php echo $scheduled_date; ?></span><span class="booking-time"><i class="fas fa-clock"></i> <?php echo $booking_time; ?></span></div>
-                                                    </div><span class="booking-status <?php echo $status_class; ?>"><?php echo ucfirst($status); ?></span>
-                                                </div><?php if (!empty($booking['Notes'])): ?><div class="booking-notes"><i class="fas fa-sticky-note"></i> <?php echo htmlspecialchars($booking['Notes']); ?></div><?php endif; ?><div class="booking-footer"><span class="booking-type"><i class="fas fa-file-invoice-dollar"></i> Quotation</span>
-                                                    <div class="booking-actions"><?php if (!empty($booking['Quoted_Amount']) && $booking['Quoted_Amount'] > 0): ?><a href="api/generate_quote_pdf.php?id=<?php echo $booking['ID']; ?>" target="_blank" class="btn-outline-small"><i class="fas fa-file-pdf"></i> Download</a><?php endif; ?><button type="button" class="btn-outline-small" onclick='openBookingModal(<?php echo $booking["ID"]; ?>, <?php echo json_encode($service_name); ?>, "<?php echo $booking["Date"]; ?>", "<?php echo $booking["Time"]; ?>", <?php echo json_encode($booking["Address"] ?? ""); ?>, <?php echo json_encode($booking["Special_Instructions"] ?? ""); ?>, <?php echo json_encode($status); ?>, <?php echo json_encode($booking["Property_Type"] ?? ""); ?>, <?php echo json_encode($booking["Cleaning_Frequency"] ?? ""); ?>, <?php echo $booking["Quoted_Amount"] ?? "null"; ?>, <?php echo json_encode($booking["Service_Image"] ?? ""); ?>)'><i class="fas fa-eye"></i> View & Edit</button><?php if ($status === 'quoted'): ?><a href="bookings.php?approve=<?php echo $booking['ID']; ?>&status=<?php echo $filter_status; ?>" class="btn-approve-small" onclick="return confirm('Do you want to approve this quote? The service will be scheduled.');"><i class="fas fa-check"></i> Approve</a><a href="javascript:void(0)" class="btn-cancel-small" onclick="handleBookingAction('decline', <?php echo $booking['ID']; ?>, this)"><i class="fas fa-times"></i> Decline</a><?php elseif ($status === 'requested' || $status === 'confirmed'): ?><a href="javascript:void(0)" class="btn-cancel-small" onclick="handleBookingAction('cancel', <?php echo $booking['ID']; ?>, this)"><i class="fas fa-times"></i> Cancel</a><?php endif; ?></div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div><?php endforeach; ?></div><?php endif; ?></div>
+                    <div class="booking-history" id="bookingHistory">
+                        <div class="empty-state"><i class="fas fa-spinner fa-spin empty-icon"></i>
+                            <h3>Loading bookings...</h3>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -487,7 +236,7 @@ if ($is_customer && $user_id) {
                         <div class="info-content"><label>Time</label><span id="modal-time-display">-</span></div>
                     </div>
                 </div>
-                <form id="edit-booking-form" method="POST" action=""><input type="hidden" id="modal-booking-id" name="booking_id"><input type="hidden" name="ajax" value="true">
+                <form id="edit-booking-form"><input type="hidden" id="modal-booking-id" name="booking_id">
                     <div class="section-header-edit"><i class="fas fa-edit"></i><span>Edit Details</span></div>
                     <div class="form-row">
                         <div class="form-group"><label class="input-label"><i class="fas fa-calendar"></i> Date</label>
@@ -581,271 +330,225 @@ if ($is_customer && $user_id) {
         </div><button class="back-to-top" aria-label="Back to top"><i class="fas fa-arrow-up"></i></button>
     </footer>
     <script src="./js/script.js"></script>
-    <script>
-        function toggleCustomerNotificationDropdown() {
-            const d = document.getElementById('notificationDropdownCustomer');
-            if (d) d.classList.toggle('active');
+    <script src="./js/config.js"></script>
+    <script type="module" src="./js/firebase/ui.js"></script>
+    <script type="module" src="./js/firebase/notifications.js"></script>
+    <script type="module">
+        import { watchMyRequests, getServices, updateRequest } from './js/firebase/data.js';
+        import { requireAuth } from './js/firebase/auth.js';
+        import { showMessage } from './js/firebase/ui.js';
+        import { downloadQuotePdf } from './js/firebase/quotePdf.js';
+
+        const authed = await requireAuth('bookings.php');
+        if (!authed) throw new Error('redirected to login');
+        const { user } = authed;
+
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const list = document.getElementById('bookingHistory');
+        const badge = document.getElementById('bookingCountBadge');
+        const filterTitle = document.getElementById('filterTitle');
+        const messages = document.getElementById('pageMessages');
+        const modal = document.getElementById('bookingModal');
+        const editForm = document.getElementById('edit-booking-form');
+
+        // Firestore status -> website filter slug / css class.
+        const SLUG = {
+            'Pending': 'requested', 'Requested': 'requested', 'Contacted': 'contacted',
+            'Quoted': 'quoted', 'Confirmed': 'confirmed', 'Approved': 'confirmed',
+            'In Progress': 'confirmed', 'Completed': 'completed',
+            'Cancelled': 'cancelled', 'Rejected': 'cancelled', 'Expired': 'expired',
+        };
+        const FILTER_BUCKETS = {
+            requested: ['requested', 'contacted', 'quoted'],
+            confirmed: ['confirmed'],
+            completed: ['completed'],
+            cancelled: ['cancelled'],
+            expired: ['expired'],
+        };
+        const EDITABLE = ['requested', 'contacted'];
+
+        let allRequests = [];
+        let serviceImages = {};
+        let currentFilter = new URLSearchParams(location.search).get('status') || 'all';
+
+        const relativeDate = iso => {
+            if (!iso) return '';
+            const d = new Date(iso), now = new Date();
+            const days = Math.floor((now - d) / 864e5);
+            if (days <= 0) return 'Today';
+            if (days === 1) return 'Yesterday';
+            if (days < 30) return `${days} days ago`;
+            return d.toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' });
+        };
+        const fmtDate = d => d ? new Date(d).toLocaleDateString('en-ZA', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+        const fmtTime = t => {
+            if (!t) return '—';
+            const [h, m] = t.split(':').map(Number);
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${ampm}`;
+        };
+        const cap = s => s ? s[0].toUpperCase() + s.slice(1) : '';
+
+        function cardHtml(b) {
+            const slug = SLUG[b.Status] || 'requested';
+            const img = serviceImages[b.Service_ID];
+            return `
+            <div class="booking-card status-${slug}">
+                <div class="booking-card-content">
+                    ${img ? `<div class="booking-image"><img src="${esc(img)}" alt="${esc(b.serviceName)}"></div>` : ''}
+                    <div class="booking-details-main">
+                        <div class="booking-card-header">
+                            <div class="booking-service-info">
+                                <h4 class="booking-service-name">${esc(b.serviceName || 'Service Booking')}</h4>
+                                <div class="booking-meta">
+                                    <span class="booking-date"><i class="fas fa-calendar-plus"></i> ${relativeDate(b.dateCreated)}</span>
+                                    <span class="booking-date"><i class="fas fa-calendar-check"></i> ${fmtDate(b.Date)}</span>
+                                    <span class="booking-time"><i class="fas fa-clock"></i> ${fmtTime(b.Time)}</span>
+                                </div>
+                            </div>
+                            <span class="booking-status status-${slug}">${esc(b.Status)}</span>
+                        </div>
+                        ${b.Notes ? `<div class="booking-notes"><i class="fas fa-sticky-note"></i> ${esc(b.Notes)}</div>` : ''}
+                        <div class="booking-footer"><span class="booking-type"><i class="fas fa-file-invoice-dollar"></i> Quotation</span>
+                            <div class="booking-actions">
+                                ${b.Quoted_Amount > 0 ? `<button type="button" class="btn-outline-small" data-action="pdf" data-id="${b.ID}"><i class="fas fa-file-pdf"></i> Download</button>` : ''}
+                                <button type="button" class="btn-outline-small" data-action="view" data-id="${b.ID}"><i class="fas fa-eye"></i> View & Edit</button>
+                                ${slug === 'quoted'
+                                    ? `<button type="button" class="btn-approve-small" data-action="approve" data-id="${b.ID}"><i class="fas fa-check"></i> Approve</button>
+                                       <button type="button" class="btn-cancel-small" data-action="decline" data-id="${b.ID}"><i class="fas fa-times"></i> Decline</button>`
+                                    : (slug === 'requested' || slug === 'confirmed')
+                                        ? `<button type="button" class="btn-cancel-small" data-action="cancel" data-id="${b.ID}"><i class="fas fa-times"></i> Cancel</button>`
+                                        : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
         }
-        document.addEventListener('click', function(e) {
-            const b = document.querySelector('.notification-bell-customer');
-            if (b && !b.contains(e.target)) {
-                const d = document.getElementById('notificationDropdownCustomer');
-                if (d) d.classList.remove('active');
+
+        function render() {
+            const counts = { all: allRequests.length, requested: 0, confirmed: 0, completed: 0, cancelled: 0, expired: 0 };
+            allRequests.forEach(b => {
+                const slug = SLUG[b.Status] || 'requested';
+                Object.keys(FILTER_BUCKETS).forEach(k => {
+                    if (FILTER_BUCKETS[k].includes(slug)) counts[k]++;
+                });
+            });
+            document.querySelectorAll('[data-count]').forEach(el => { el.textContent = counts[el.dataset.count] ?? 0; });
+            badge.textContent = `${counts.all} Total`;
+            filterTitle.textContent = currentFilter === 'all' ? 'All Bookings' : `${cap(currentFilter)} Bookings`;
+            document.querySelectorAll('#bookingFilters .filter-btn').forEach(a =>
+                a.classList.toggle('active', a.dataset.status === currentFilter));
+
+            const show = currentFilter === 'all' ? allRequests
+                : allRequests.filter(b => FILTER_BUCKETS[currentFilter]?.includes(SLUG[b.Status] || 'requested'));
+            list.innerHTML = show.length
+                ? `<div class="bookings-list">${show.map(cardHtml).join('')}</div>`
+                : `<div class="empty-state"><i class="fas fa-calendar-check empty-icon"></i>
+                        <h3>No Bookings Found</h3>
+                        <p>${currentFilter === 'all'
+                            ? "You haven't made any bookings yet. Start by booking our cleaning services!"
+                            : `No ${cap(currentFilter)} bookings found.`}</p>
+                        <a href="services.php" class="btn-primary"><i class="fas fa-calendar-plus"></i> Book Services</a>
+                    </div>`;
+        }
+
+        document.getElementById('bookingFilters').addEventListener('click', e => {
+            const a = e.target.closest('.filter-btn');
+            if (!a) return;
+            e.preventDefault();
+            currentFilter = a.dataset.status;
+            history.replaceState(null, '', `bookings.php?status=${currentFilter}`);
+            render();
+        });
+
+        /* ------------------------- Modal ------------------------- */
+        function openModal(b) {
+            const slug = SLUG[b.Status] || 'requested';
+            document.getElementById('modal-booking-id').value = b.ID;
+            document.getElementById('modal-booking-number').textContent = b.refNumber || b.ID;
+            document.getElementById('modal-service-name').textContent = b.serviceName || 'Service';
+            document.getElementById('modal-property-display').textContent = cap(b.Property_Type || 'house');
+            document.getElementById('modal-frequency-display').textContent = cap(b.Cleaning_Frequency || 'once');
+            document.getElementById('modal-date-display').textContent = fmtDate(b.Date);
+            document.getElementById('modal-time-display').textContent = fmtTime(b.Time);
+            document.getElementById('status-text').textContent = `Status: ${b.Status}`;
+            document.getElementById('modal-date').value = b.Date || '';
+            document.getElementById('modal-time').value = b.Time || '';
+            document.getElementById('modal-address').value = b.Address || '';
+            document.getElementById('modal-instructions').value = b.Special_Instructions || '';
+            const locked = !EDITABLE.includes(slug);
+            document.getElementById('admin-notice').style.display = locked ? '' : 'none';
+            document.getElementById('btn-save').style.display = locked ? 'none' : '';
+            modal.style.display = '';
+        }
+        function closeModal() { modal.style.display = 'none'; }
+        window.closeBookingModal = closeModal;
+
+        editForm.addEventListener('submit', async e => {
+            e.preventDefault();
+            const id = document.getElementById('modal-booking-id').value;
+            try {
+                await updateRequest(id, {
+                    requestedDate: document.getElementById('modal-date').value,
+                    requestedTime: document.getElementById('modal-time').value,
+                    siteAddress: document.getElementById('modal-address').value,
+                    specialInstructions: document.getElementById('modal-instructions').value,
+                });
+                closeModal();
+                showMessage('Booking updated successfully.', 'success', messages);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (err) {
+                console.error(err);
+                showMessage('Could not update the booking. Please try again.', 'error', messages);
             }
         });
-        async function markCustomerNotificationRead(id) {
+
+        /* -------------------- Card actions (delegated) -------------------- */
+        list.addEventListener('click', async e => {
+            const btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            const b = allRequests.find(x => x.ID === btn.dataset.id);
+            if (!b) return;
+            const action = btn.dataset.action;
             try {
-                const r = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_read',
-                        notification_id: id
-                    })
-                });
-                const result = await r.json();
-                if (result.success) {
-                    const item = document.querySelector('[data-id="' + id + '"]');
-                    if (item) {
-                        item.style.opacity = '0';
-                        setTimeout(() => item.remove(), 300);
+                if (action === 'view') {
+                    openModal(b);
+                } else if (action === 'pdf') {
+                    await downloadQuotePdf(b);
+                } else if (action === 'approve') {
+                    if (confirm('Do you want to approve this quote? The service will be scheduled.')) {
+                        await updateRequest(b.ID, { status: 'Confirmed' });
+                        showMessage(`Quote ${b.refNumber || b.ID} approved.`, 'success', messages);
                     }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) {
-                        const c = parseInt(badge.textContent);
-                        if (c > 1) badge.textContent = c - 1;
-                        else badge.remove();
+                } else if (action === 'decline' || action === 'cancel') {
+                    const msg = action === 'decline'
+                        ? 'Decline this quote?'
+                        : 'Cancel this booking?';
+                    if (confirm(msg)) {
+                        await updateRequest(b.ID, { status: 'Cancelled' });
+                        showMessage(`Booking ${b.refNumber || b.ID} ${action === 'decline' ? 'declined' : 'cancelled'}.`, 'info', messages);
                     }
                 }
-            } catch (e) {
-                console.error('Error:', e);
+            } catch (err) {
+                console.error(err);
+                showMessage('That action failed. Please try again.', 'error', messages);
             }
-        }
-        async function markAllCustomerNotificationsRead() {
-            try {
-                const r = await fetch('api/notification_actions.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'mark_all_read'
-                    })
-                });
-                const result = await r.json();
-                if (result.success) {
-                    const content = document.querySelector('.notification-dropdown-customer .notification-dropdown-content');
-                    if (content) {
-                        content.innerHTML = '<div class="no-notifications"><i class="fas fa-bell-slash"></i><p>No new notifications</p></div>';
-                    }
-                    const badge = document.querySelector('.notification-badge-customer');
-                    if (badge) badge.remove();
-                }
-            } catch (e) {
-                console.error('Error:', e);
-            }
-        }
-        const alerts = document.querySelectorAll('.alert');
-        alerts.forEach(alert => {
-            setTimeout(() => {
-                alert.style.opacity = '0';
-                alert.style.transform = 'translateY(-10px)';
-                alert.style.transition = 'all 0.3s ease';
-                setTimeout(() => alert.remove(), 300);
-            }, 5000);
         });
 
-        function openBookingModal(id, serviceName, date, time, address, instructions, status, propertyType, frequency, quotedAmount, serviceImage) {
-            console.log('Opening modal for booking:', id, serviceName, 'Quote:', quotedAmount, 'Image:', serviceImage);
+        getServices().then(svcs => {
+            svcs.forEach(s => { if (s.Image_URL) serviceImages[s.ID] = s.Image_URL; });
+            render();
+        }).catch(console.error);
 
-            function setText(id, value) {
-                const el = document.getElementById(id);
-                if (el) el.textContent = value;
-                else console.warn('Element not found:', id);
-            }
-
-            function setValue(id, value) {
-                const el = document.getElementById(id);
-                if (el) el.value = value;
-                else console.warn('Element not found:', id);
-            }
-            setValue('modal-booking-id', id);
-            setText('modal-service-name', serviceName);
-            setText('status-text', 'Status: ' + status.charAt(0).toUpperCase() + status.slice(1));
-            const serviceCard = document.getElementById('modal-service-card');
-            if (serviceImage && serviceCard) {
-                serviceCard.style.backgroundImage = "url('" + serviceImage + "')";
-                serviceCard.style.backgroundSize = 'cover';
-                serviceCard.style.backgroundPosition = 'center';
-                serviceCard.style.backgroundRepeat = 'no-repeat';
-            } else if (serviceCard) {
-                serviceCard.style.backgroundImage = 'none';
-            }
-            const statusIcon = document.getElementById('status-icon');
-            if (statusIcon) statusIcon.className = 'fas fa-info-circle status-icon-' + status;
-            setText('modal-property-display', propertyType || 'N/A');
-            setText('modal-frequency-display', frequency || 'One-time');
-            setText('modal-date-display', date);
-            setText('modal-time-display', time.substring(0, 5));
-            setValue('modal-date', date);
-            setValue('modal-time', time.substring(0, 5));
-            setValue('modal-address', address);
-            setValue('modal-instructions', instructions || '');
-            setText('modal-booking-number', id);
-            const form = document.getElementById('edit-booking-form');
-            if (form) form.action = 'bookings.php?edit=' + id;
-            const canEdit = status === 'requested';
-            const inputs = document.querySelectorAll('#edit-booking-form input, #edit-booking-form select, #edit-booking-form textarea');
-            const saveBtn = document.getElementById('btn-save');
-            const adminNotice = document.getElementById('admin-notice');
-            if (canEdit) {
-                inputs.forEach(input => input.disabled = false);
-                saveBtn.style.display = 'inline-flex';
-                adminNotice.style.display = 'none';
-                const now = new Date();
-                const currentHour = now.getHours();
-                const dateInput = document.getElementById('modal-date');
-                if (currentHour >= 12) {
-                    const tomorrow = new Date(now);
-                    tomorrow.setDate(tomorrow.getDate() + 1);
-                    dateInput.min = tomorrow.toISOString().split('T')[0];
-                } else {
-                    dateInput.min = now.toISOString().split('T')[0];
-                }
-                updateTimeOptions();
-            } else {
-                inputs.forEach(input => input.disabled = true);
-                saveBtn.style.display = 'none';
-                adminNotice.style.display = 'flex';
-            }
-            document.getElementById('bookingModal').style.display = 'flex';
-            document.body.style.overflow = 'hidden';
-            const modalActions = document.getElementById('modal-actions');
-            if (quotedAmount && quotedAmount > 0) {
-                if (!document.getElementById('download-pdf-btn')) {
-                    const pdfBtn = document.createElement('button');
-                    pdfBtn.id = 'download-pdf-btn';
-                    pdfBtn.type = 'button';
-                    pdfBtn.className = 'btn-close-modal';
-                    pdfBtn.style.cssText = 'background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); color: white; border: none; padding: 1rem 1.5rem; border-radius: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 0.75rem;';
-                    pdfBtn.innerHTML = '<div class="btn-icon"><i class="fas fa-file-pdf"></i></div><div class="btn-text"><span class="btn-main-text">Download Quote</span><span class="btn-sub-text">View as PDF</span></div>';
-                    pdfBtn.onclick = function() {
-                        window.open('api/generate_quote_pdf.php?id=' + id, '_blank');
-                    };
-                    const closeBtn = modalActions.querySelector('.btn-close-modal');
-                    if (closeBtn) modalActions.insertBefore(pdfBtn, closeBtn);
-                }
-            } else {
-                const existingPdfBtn = document.getElementById('download-pdf-btn');
-                if (existingPdfBtn) existingPdfBtn.remove();
-            }
-        }
-
-        function closeBookingModal() {
-            document.getElementById('bookingModal').style.display = 'none';
-            document.body.style.overflow = 'auto';
-        }
-        async function handleBookingAction(action, bookingId, element) {
-            const confirmMessage = action === 'cancel' ? 'Are you sure you want to cancel this booking?' : 'Are you sure you want to decline this quote?';
-            if (!confirm(confirmMessage)) return;
-            try {
-                const formData = new FormData();
-                formData.append('action', action);
-                formData.append('booking_id', bookingId);
-                const response = await fetch('bookings.php', {
-                    method: 'POST',
-                    body: formData
-                });
-                const text = await response.text();
-                if (text.includes('cancelled successfully') || text.includes('declined successfully')) {
-                    showNotification(action === 'cancel' ? 'Booking cancelled successfully' : 'Quote declined successfully', 'success');
-                    const card = element.closest('.booking-card');
-                    if (card) {
-                        card.style.opacity = '0';
-                        setTimeout(() => card.remove(), 300);
-                    }
-                    updateFilterCounts();
-                } else {
-                    showNotification('Failed to ' + action + ' booking', 'error');
-                }
-            } catch (error) {
-                console.error('Error handling booking action:', error);
-                showNotification('Failed to ' + action + ' booking', 'error');
-            }
-        }
-
-        function updateFilterCounts() {
-            const counts = document.querySelectorAll('.filter-count');
-            counts.forEach(count => {
-                const current = parseInt(count.textContent);
-                if (current > 0) {
-                    count.textContent = current - 1;
-                }
-            });
-        }
-
-        function showNotification(message, type = 'success') {
-            const notification = document.createElement('div');
-            notification.className = 'notification ' + type;
-            notification.innerHTML = '<i class="fas fa-' + (type === 'success' ? 'check-circle' : 'exclamation-circle') + '"></i><span>' + message + '</span>';
-            document.body.appendChild(notification);
-            setTimeout(() => {
-                notification.classList.add('show');
-            }, 10);
-            setTimeout(() => {
-                notification.classList.remove('show');
-                setTimeout(() => {
-                    notification.remove();
-                }, 400);
-            }, 3000);
-        }
-
-        function updateTimeOptions() {
-            const dateInput = document.getElementById('modal-date');
-            const timeSelect = document.getElementById('modal-time');
-            const selectedDate = dateInput.value;
-            if (!selectedDate) return;
-            const now = new Date();
-            const today = now.toISOString().split('T')[0];
-            const currentTime = now.getHours() * 60 + now.getMinutes();
-            const options = timeSelect.querySelectorAll('option');
-            options.forEach(option => {
-                const timeValue = option.value;
-                const [hours, minutes] = timeValue.split(':').map(Number);
-                const optionTimeMinutes = hours * 60 + minutes;
-                if (selectedDate === today) {
-                    option.disabled = optionTimeMinutes <= currentTime;
-                } else {
-                    option.disabled = false;
-                }
-            });
-        }
-        document.addEventListener('DOMContentLoaded', function() {
-            const modalDate = document.getElementById('modal-date');
-            if (modalDate) {
-                modalDate.addEventListener('change', updateTimeOptions);
-            }
-            const bookingModal = document.getElementById('bookingModal');
-            if (bookingModal) {
-                bookingModal.addEventListener('click', function(e) {
-                    if (e.target === this) {
-                        closeBookingModal();
-                    }
-                });
-            }
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') {
-                    closeBookingModal();
-                }
-            });
+        watchMyRequests(user.uid, requests => {
+            allRequests = requests;
+            render();
+            // Honour profile.php "View" links: bookings.php?view=<id>
+            const viewId = new URLSearchParams(location.search).get('view');
+            const target = viewId && allRequests.find(x => x.ID === viewId);
+            if (target) openModal(target);
         });
-        <?php if ($view_booking): ?>
-            document.addEventListener('DOMContentLoaded', function() {
-                openBookingModal(<?php echo $view_booking['ID']; ?>, <?php echo json_encode($view_booking['Service_Name'] ?? 'Service'); ?>, '<?php echo $view_booking['Date']; ?>', '<?php echo $view_booking['Time']; ?>', <?php echo json_encode($view_booking['Address'] ?? ''); ?>, <?php echo json_encode($view_booking['Special_Instructions'] ?? ''); ?>, <?php echo json_encode(strtolower($view_booking['Status'] ?? 'requested')); ?>, <?php echo json_encode($view_booking['Property_Type'] ?? ''); ?>, <?php echo json_encode($view_booking['Cleaning_Frequency'] ?? ''); ?>, <?php echo $view_booking['Quoted_Amount'] ?? 'null'; ?>);
-            });
-        <?php endif; ?>
     </script>
 </body>
 
