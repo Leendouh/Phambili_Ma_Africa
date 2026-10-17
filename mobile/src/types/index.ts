@@ -24,6 +24,9 @@ export interface Service {
   description: string;
   price: number;
   isActive: boolean;
+  category?: string;
+  duration?: number;
+  imageUrl?: string;
 }
 
 export interface ServiceRequest {
@@ -32,8 +35,13 @@ export interface ServiceRequest {
   customerId: string;
   customerName?: string;
   customerPhone?: string;
+  customerEmail?: string;
   serviceId: string;
   serviceName: string;
+  propertyType?: string;
+  cleaningFrequency?: string;
+  specialRequests?: string;
+  duration?: number | null;
   employeeId?: string;
   employeeName?: string;
   staffId?: string;

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
+import SplashScreen from '../screens/auth/SplashScreen';
 import CustomerTabs from './CustomerTabs';
 import EmployeeTabs from './EmployeeTabs';
 
@@ -10,9 +11,15 @@ const Stack = createNativeStackNavigator();
 
 export default function AuthNavigator() {
   const { userProfile, loading } = useAuth();
+  const [splashDone, setSplashDone] = useState(false);
 
-  if (loading) {
-    return null; // Or a loading screen
+  useEffect(() => {
+    const timer = setTimeout(() => setSplashDone(true), 2200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading || !splashDone) {
+    return <SplashScreen />;
   }
 
   return (

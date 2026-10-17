@@ -69,9 +69,8 @@ export default function RegisterScreen({ navigation }: any) {
     try {
       await register(formData);
       Alert.alert(
-        'Registration Successful',
-        'Your account has been created. You can now log in.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
+        'Welcome to Phambili Ma-Africa',
+        `Your account is ready, ${formData.firstName}. Pick a service to make your first request.`
       );
     } catch (error: any) {
       Alert.alert('Registration Failed', error.message);

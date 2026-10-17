@@ -122,7 +122,7 @@ export default function NewRequestScreen({ route, navigation }: Props) {
 
         <View style={styles.summaryCard}>
           <View style={styles.summaryIconWrap}>
-            <Ionicons name="construct-outline" size={22} color={C.textOnPrimary} />
+            <Ionicons name="construct-outline" size={22} color={C.primary} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.summaryLabel}>Selected service</Text>
@@ -130,7 +130,9 @@ export default function NewRequestScreen({ route, navigation }: Props) {
             <Text style={styles.summaryDesc} numberOfLines={1}>{service?.description}</Text>
           </View>
           <View style={styles.pricePill}>
-            <Text style={styles.priceText}>R {service?.price.toFixed(2)}</Text>
+            <Text style={styles.priceText}>
+              {service?.price ? `R ${service.price.toFixed(2)}` : 'Custom Quote'}
+            </Text>
           </View>
         </View>
 
@@ -227,7 +229,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radii.md,
-    backgroundColor: C.primarySoft,
+    backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing.md,
