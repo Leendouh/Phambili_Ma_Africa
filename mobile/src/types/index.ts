@@ -15,6 +15,7 @@ export interface User {
   phone?: string;
   address?: string;
   isAvailable?: boolean;
+  firstLogin?: boolean;
   dateRegistered?: string;
 }
 

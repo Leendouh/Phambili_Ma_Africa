@@ -50,6 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           phone: data.phone,
           address: data.address,
           isAvailable: data.isAvailable,
+          firstLogin: data.firstLogin,
           dateRegistered: data.dateRegistered,
         });
       } else {
