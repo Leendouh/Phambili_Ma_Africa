@@ -5,10 +5,12 @@ import {
   StyleSheet,
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
+import { Calendar } from 'react-native-calendars';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
@@ -28,6 +30,60 @@ interface Props {
   navigation: any;
 }
 
+const TIME_SLOTS: string[] = (() => {
+  const slots: string[] = [];
+  for (let h = 7; h <= 18; h++) {
+    slots.push(`${String(h).padStart(2, '0')}:00`);
+    if (h < 18) slots.push(`${String(h).padStart(2, '0')}:30`);
+  }
+  return slots;
+})();
+
+const now = new Date();
+const TODAY_ISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatDisplayDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return `${d} ${MONTH_NAMES[m - 1]} ${y}`;
+}
+
+function PickerField({
+  label,
+  icon,
+  value,
+  placeholder,
+  error,
+  onPress,
+}: {
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  value: string;
+  placeholder: string;
+  error?: string;
+  onPress: () => void;
+}) {
+  return (
+    <View style={{ marginBottom: spacing.lg }}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TouchableOpacity
+        style={[styles.fieldWrap, error ? { borderColor: C.danger } : null]}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
+        <Ionicons name={icon} size={18} color={C.textMuted} style={{ marginRight: 10 }} />
+        <Text style={[styles.fieldText, !value && { color: C.textMuted }]}>
+          {value || placeholder}
+        </Text>
+        <Ionicons name="chevron-down" size={18} color={C.textMuted} />
+      </TouchableOpacity>
+      {!!error && <Text style={styles.errorText}>{error}</Text>}
+    </View>
+  );
+}
+
 export default function NewRequestScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { userProfile } = useAuth();
@@ -40,6 +96,8 @@ export default function NewRequestScreen({ route, navigation }: Props) {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -138,28 +196,22 @@ export default function NewRequestScreen({ route, navigation }: Props) {
 
         <Text style={styles.sectionHeading}>Schedule details</Text>
 
-        <AppInput
+        <PickerField
           label="Requested date"
           icon="calendar-outline"
-          placeholder="YYYY-MM-DD"
-          value={formData.requestedDate}
-          onChangeText={(text) => {
-            setFormData({ ...formData, requestedDate: text });
-            if (errors.requestedDate) setErrors({ ...errors, requestedDate: '' });
-          }}
+          placeholder="Select a date"
+          value={formData.requestedDate ? formatDisplayDate(formData.requestedDate) : ''}
           error={errors.requestedDate}
+          onPress={() => setShowDatePicker(true)}
         />
 
-        <AppInput
+        <PickerField
           label="Requested time"
           icon="time-outline"
-          placeholder="HH:MM (24-hour format)"
+          placeholder="Select a time (07:00 - 18:00)"
           value={formData.requestedTime}
-          onChangeText={(text) => {
-            setFormData({ ...formData, requestedTime: text });
-            if (errors.requestedTime) setErrors({ ...errors, requestedTime: '' });
-          }}
           error={errors.requestedTime}
+          onPress={() => setShowTimePicker(true)}
         />
 
         <AppInput
@@ -183,6 +235,91 @@ export default function NewRequestScreen({ route, navigation }: Props) {
           onPress={handleSubmit}
         />
       </ScrollView>
+
+      <Modal
+        visible={showDatePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select a date</Text>
+            <Calendar
+              minDate={TODAY_ISO}
+              markedDates={
+                formData.requestedDate
+                  ? { [formData.requestedDate]: { selected: true, selectedColor: C.accent, selectedTextColor: C.primary } }
+                  : {}
+              }
+              onDayPress={(day: { dateString: string }) => {
+                setFormData({ ...formData, requestedDate: day.dateString });
+                if (errors.requestedDate) setErrors({ ...errors, requestedDate: '' });
+                setShowDatePicker(false);
+              }}
+              theme={{
+                calendarBackground: C.surface,
+                monthTextColor: C.text,
+                dayTextColor: C.text,
+                textDisabledColor: C.textMuted,
+                textSectionTitleColor: C.textMuted,
+                arrowColor: C.primary,
+                todayTextColor: C.accentDark,
+                selectedDayBackgroundColor: C.accent,
+                selectedDayTextColor: C.primary,
+                textDayFontFamily: fontFamily.body,
+                textMonthFontFamily: fontFamily.headingMedium,
+                textDayHeaderFontFamily: fontFamily.bodyBold,
+              }}
+            />
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowDatePicker(false)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showTimePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTimePicker(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select a time</Text>
+            <ScrollView style={styles.timeList} showsVerticalScrollIndicator={false}>
+              {TIME_SLOTS.map((slot) => {
+                const selected = formData.requestedTime === slot;
+                return (
+                  <TouchableOpacity
+                    key={slot}
+                    style={[styles.timeRow, selected && styles.timeRowSelected]}
+                    onPress={() => {
+                      setFormData({ ...formData, requestedTime: slot });
+                      if (errors.requestedTime) setErrors({ ...errors, requestedTime: '' });
+                      setShowTimePicker(false);
+                    }}
+                  >
+                    <Ionicons
+                      name="time-outline"
+                      size={16}
+                      color={selected ? C.primary : C.textMuted}
+                    />
+                    <Text style={[styles.timeRowText, selected && styles.timeRowTextSelected]}>
+                      {slot}
+                    </Text>
+                    {selected && <Ionicons name="checkmark" size={18} color={C.primary} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowTimePicker(false)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -270,5 +407,89 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: C.text,
     marginBottom: spacing.lg,
+  },
+  fieldLabel: {
+    fontFamily: fontFamily.bodyBold,
+    fontSize: 13,
+    color: C.text,
+    marginBottom: spacing.sm,
+  },
+  fieldWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.surface,
+    borderWidth: 1.5,
+    borderColor: C.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    minHeight: 50,
+  },
+  fieldText: {
+    flex: 1,
+    fontFamily: fontFamily.body,
+    fontSize: 15,
+    color: C.text,
+    paddingVertical: 13,
+  },
+  errorText: {
+    fontFamily: fontFamily.body,
+    fontSize: 12,
+    color: C.danger,
+    marginTop: 6,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(8, 29, 51, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  modalCard: {
+    backgroundColor: C.surface,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    width: '100%',
+    maxWidth: 380,
+  },
+  modalTitle: {
+    fontFamily: fontFamily.headingMedium,
+    fontSize: 16,
+    color: C.text,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  modalCancel: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  modalCancelText: {
+    fontFamily: fontFamily.bodyBold,
+    fontSize: 14,
+    color: C.textMuted,
+  },
+  timeList: {
+    maxHeight: 320,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
+  },
+  timeRowSelected: {
+    backgroundColor: C.accent,
+  },
+  timeRowText: {
+    flex: 1,
+    fontFamily: fontFamily.body,
+    fontSize: 15,
+    color: C.text,
+  },
+  timeRowTextSelected: {
+    fontFamily: fontFamily.bodyBold,
+    color: C.primary,
   },
 });
